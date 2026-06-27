@@ -1,0 +1,10 @@
+{
+	"id": "md-to-html-effect",
+	"name": "MD to HTML Effectiveness",
+	"version": "1.0.0",
+	"minAppVersion": "1.5.0",
+	"description": "Convert markdown files to html-effectiveness standard HTML. Single-file, dark themed, self-contained HTML output.",
+	"author": "rosswang",
+	"authorUrl": "https://github.com/yanqingwang",
+	"isDesktopOnly": false
+}
