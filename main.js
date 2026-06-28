@@ -238,7 +238,7 @@ function parseInline(text) {
   s = s.replace(/_(.+?)_/g, "<em>$1</em>");
   s = s.replace(/~~(.+?)~~/g, "<del>$1</del>");
   s = s.replace(/!\[(.+?)\]\((.+?)\)/g, '<img alt="$1" src="$2">');
-  s = s.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, '<a href="$1">$2' + (s.includes("$2") ? "" : "$1") + "</a>");
+  s = s.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, page, alias) => '<a href="' + escapeHtml(page) + '">' + escapeHtml(alias || page) + "</a>");
   s = s.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2">$1</a>');
   return s;
 }
