@@ -1,10 +1,1 @@
-{
-	"id": "md-to-html-effect",
-	"name": "MD to HTML Effectiveness",
-	"version": "1.0.1",
-	"minAppVersion": "1.5.0",
-	"description": "Convert markdown files to html-effectiveness standard HTML. Single-file, dark themed, self-contained HTML output.",
-	"author": "rosswang",
-	"authorUrl": "https://github.com/yanqingwang",
-	"isDesktopOnly": false
-}
+{"id":"md-to-html-effect","name":"MD to HTML Effectiveness","version":"1.0.19","minAppVersion":"1.6.0","description":"Render spatial HTML in notes — compare, timeline, diagram, report, slides. Export as standalone HTML with zoom controls. Based on html-effectiveness methodology.","author":"rosswang","authorUrl":"https://github.com/yanqingwang","isDesktopOnly":false}
