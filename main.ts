@@ -175,7 +175,7 @@ export default class MD2HEPlugin extends Plugin {
 		this.addCommand({
 			id: 'convert-batch-md-to-html',
 			name: 'Convert all markdown in folder to HTML',
-			callback: async () => {
+			callback: async (): Promise<void> => {
 				const file = this.app.workspace.getActiveFile();
 				if (!file) { new Notice('Open a file in the folder to convert'); return; }
 				const folder = file.parent;
