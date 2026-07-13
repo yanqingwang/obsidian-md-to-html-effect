@@ -54,7 +54,7 @@ function mdToHtml(md: string): string {
 	lines = stripFrontmatter(lines);
 	const html: string[] = [];
 	let inCode = false, codeLang = '', codeContent: string[] = [];
-	let inTableHeader = true, isOrdered = false;
+	let inTableHeader = true;
 	let inList: string[] = [];
 	let listType = '';
 	let tableOpen = false;
@@ -196,7 +196,7 @@ export default class MD2HEPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		const data = await this.loadData();
+		const data: Record<string, unknown> | null = await this.loadData() as Record<string, unknown> | null;
 		if (data && typeof data === 'object') {
 			const o = data as Record<string, unknown>;
 			if (o.theme === 'light') this.settings.theme = 'light';
