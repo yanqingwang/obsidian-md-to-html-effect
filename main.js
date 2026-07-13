@@ -35,65 +35,28 @@ function escapeHtml(s) {
 }
 var CSS_DARK = `
 * { margin:0;padding:0;box-sizing:border-box; }
-body { background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;padding:28px 32px;max-width:1100px;margin:0 auto;line-height:1.75;font-size:15px;transition:background .2s,color .2s; }
-body.light { background:#ffffff;color:#1f2328; }
-body.light h1 { color:#0969da; } body.light h2 { color:#bd561d;border-bottom-color:#d0d7de; } body.light h3 { color:#8250df; }
-body.light p { color:#1f2328; } body.light strong { color:#1f2328; } body.light em { color:#1f2328; }
-body.light code { background:#e8ecf0;color:#1f2328; }
-body.light pre { background:#f6f8fa;border-color:#d0d7de; } body.light pre code { color:#1f2328; }
-body.light table { box-shadow:0 1px 3px rgba(0,0,0,.05); }
-body.light th { background:#f6f8fa;color:#656d76; }
-body.light td { border-bottom-color:#d0d7de; } body.light tr:nth-child(even) td { background:#fafbfc; }
-body.light tr:hover td { background:#f0f2f5; }
-body.light blockquote { background:#f6f8fa;color:#656d76;border-left-color:#0969da; }
-body.light hr { border-top-color:#d0d7de; }
-body.light .theme-toggle { background:#e8ecf0;border-color:#d0d7de;color:#1f2328; }
-body.light .theme-toggle:hover { background:#d0d7de; }
-body.light .subtitle { color:#656d76; }
-
-.theme-toggle { position:fixed;top:14px;right:14px;z-index:999;background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit;transition:background .2s;user-select:none; }
-.theme-toggle:hover { background:#30363d; }
-
-h1 { color:#58a6ff;font-size:32px;margin:40px 0 4px;letter-spacing:-.5px;font-weight:700; }
-h2 { color:#f0883e;font-size:22px;margin:36px 0 14px;border-bottom:2px solid #30363d;padding-bottom:10px;font-weight:600; }
-h3 { color:#d2a8ff;font-size:18px;margin:28px 0 10px;font-weight:600; }
-h4 { color:#8b949e;font-size:13px;margin:24px 0 8px;text-transform:uppercase;letter-spacing:.8px;font-weight:600; }
-
-p { margin:10px 0;line-height:1.75; }
-a { color:#58a6ff;text-decoration:none;border-bottom:1px solid transparent;transition:border .2s; }
-a:hover { border-bottom-color:#58a6ff;text-decoration:none; }
-strong { color:#f0f6fc;font-weight:700; }
-em { color:#e6edf3;font-style:italic; }
-del,s { text-decoration:line-through;color:#8b949e; }
-
-code { background:#21262d;padding:2px 8px;border-radius:4px;font-size:.875em;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace; }
-pre { background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;overflow-x:auto;margin:16px 0;line-height:1.6;font-size:13px; }
-pre code { background:none;padding:0;border-radius:0;font-size:inherit; }
-
-table { width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;border:1px solid #30363d;border-radius:8px;overflow:hidden; }
-thead { border-bottom:2px solid #30363d; }
-th { background:#161b22;color:#8b949e;padding:10px 14px;text-align:left;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.6px; }
-td { padding:10px 14px;border-bottom:1px solid #21262d;vertical-align:top; }
-tr:last-child td { border-bottom:none; }
-tr:nth-child(even) td { background:#181d24; }
-tr:hover td { background:#1c2128; }
-
-ul,ol { margin:8px 0;padding-left:28px; }
-li { margin:6px 0;line-height:1.7; }
-li::marker { color:#8b949e; }
-
-blockquote { border-left:4px solid #58a6ff;padding:12px 22px;margin:16px 0;color:#8b949e;background:#161b22;border-radius:0 8px 8px 0;font-size:14px;line-height:1.7; }
-blockquote p { margin:6px 0; }
-blockquote strong { color:#c9d1d9; }
-
-img { max-width:100%;border-radius:8px;margin:16px 0;border:1px solid #30363d; }
-hr { border:none;border-top:1px solid #30363d;margin:32px 0; }
-
-.subtitle { color:#8b949e;font-size:13px;margin-bottom:28px;padding-bottom:16px;border-bottom:1px solid #21262d; }
-
-@media (max-width:768px) { body { padding:16px 18px; } table { font-size:13px; } th,td { padding:8px 10px; } }
-@media print { body { background:#fff!important;color:#222!important; } .theme-toggle { display:none; } th { background:#f5f5f5!important;color:#555!important; } }
-`;
+body { background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;padding:24px;max-width:1000px;margin:0 auto;line-height:1.7; }
+h1 { color:#58a6ff;font-size:28px;margin:32px 0 12px; }
+h2 { color:#f0883e;font-size:22px;margin:28px 0 10px;border-bottom:1px solid #30363d;padding-bottom:8px; }
+h3 { color:#d2a8ff;font-size:17px;margin:24px 0 8px; }
+a { color:#58a6ff;text-decoration:none; }
+a:hover { text-decoration:underline; }
+strong { color:#f0f6fc; }
+code { background:#21262d;padding:2px 6px;border-radius:4px;font-size:.9em;font-family:'SFMono-Regular',Consolas,monospace; }
+pre { background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;overflow:auto;margin:12px 0; }
+pre code { background:none;padding:0;border-radius:0; }
+table { width:100%;border-collapse:collapse;margin:12px 0;font-size:14px; }
+th { background:#161b22;color:#8b949e;padding:10px 8px;border-bottom:1px solid #30363d;text-align:left;font-weight:600; }
+td { padding:10px 8px;border-bottom:1px solid #21262d; }
+tr:hover { background:#161b22; }
+ul,ol { margin:8px 0;padding-left:24px; }
+li { margin:4px 0; }
+blockquote { border-left:3px solid #30363d;padding:8px 16px;margin:12px 0;color:#8b949e;background:#161b22;border-radius:0 8px 8px 0; }
+img { max-width:100%;border-radius:8px;margin:12px 0; }
+hr { border:none;border-top:1px solid #30363d;margin:24px 0; }
+p { margin:12px 0; }
+@media (max-width:768px){body{padding:16px;}}`;
+var CSS_LIGHT = CSS_DARK.replace(/#0d1117/g, "#ffffff").replace(/#c9d1d9/g, "#1f2328").replace(/#161b22/g, "#f6f8fa").replace(/#30363d/g, "#d0d7de").replace(/#21262d/g, "#e8ecf0").replace(/#58a6ff/g, "#0969da").replace(/#f0883e/g, "#bd561d").replace(/#d2a8ff/g, "#8250df").replace(/#8b949e/g, "#656d76").replace(/#f0f6fc/g, "#1f2328");
 function stripFrontmatter(lines) {
   if (lines.length > 0 && lines[0].trim() === "---") {
     for (let i = 1; i < lines.length; i++) {
@@ -153,17 +116,12 @@ function mdToHtml(md) {
         continue;
       }
       if (!tableOpen) {
-        html.push("<table>");
+        html.push("<table><thead></thead><tbody>");
         tableOpen = true;
         inTableHeader = true;
       }
       const tag = inTableHeader ? "th" : "td";
-      if (inTableHeader) {
-        html.push("<thead><tr>" + cells.map((c) => "<th>" + parseInline(c.trim()) + "</th>").join("") + "</tr></thead><tbody>");
-        inTableHeader = false;
-      } else {
-        html.push("<tr>" + cells.map((c) => "<td>" + parseInline(c.trim()) + "</td>").join("") + "</tr>");
-      }
+      html.push("<tr>" + cells.map((c) => "<" + tag + ">" + parseInline(c.trim()) + "</" + tag + ">").join("") + "</tr>");
       continue;
     }
     if (line.trim() === "---" && tableOpen) {
@@ -223,12 +181,7 @@ function mdToHtml(md) {
     if (line.trim() === "") {
       continue;
     }
-    const trimmed = line.trim();
-    if (/^\d+[%\$].*/.test(trimmed) || /^-?\$?\d+(\.\d+)?[%MBT]?[xX]/.test(trimmed)) {
-      html.push("<p><strong>" + parseInline(line) + "</strong></p>");
-    } else {
-      html.push("<p>" + parseInline(line) + "</p>");
-    }
+    html.push("<p>" + parseInline(line) + "</p>");
   }
   flushList();
   flushTable();
@@ -237,24 +190,11 @@ function mdToHtml(md) {
   return html.join("\n");
 }
 function parseInline(text) {
-  let s = escapeHtml(text);
-  s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
-  s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/__(.+?)__/g, "<strong>$1</strong>");
-  s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  s = s.replace(/_(.+?)_/g, "<em>$1</em>");
-  s = s.replace(/~~(.+?)~~/g, "<del>$1</del>");
-  s = s.replace(/!\[(.+?)\]\((.+?)\)/g, '<img alt="$1" src="$2">');
-  s = s.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, page, alias) => '<a href="' + escapeHtml(page) + '">' + escapeHtml(alias || page) + "</a>");
-  s = s.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2">$1</a>');
-  return s;
+  return escapeHtml(text).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/__(.+?)__/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>").replace(/_(.+?)_/g, "<em>$1</em>").replace(/!\[(.+?)\]\((.+?)\)/g, '<img alt="$1" src="$2">').replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, '<a href="$1">$2$1</a>').replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2">$1</a>');
 }
 function buildHtml(title, bodyHtml, theme) {
-  const css = CSS_DARK;
-  const now = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
-  return '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<title>' + escapeHtml(title) + "</title>\n<style>\n" + css + "\n</style>\n</head>\n<body" + (theme === "light" ? ' class="light"' : "") + `>
-<button class="theme-toggle" onclick="document.body.classList.toggle('light')">\u2601 Switch Theme</button>
-<div class="subtitle">` + now + " &middot; Generated by MD to HTML Effectiveness</div>\n" + bodyHtml + "\n</body>\n</html>";
+  const css = theme === "light" ? CSS_LIGHT : CSS_DARK;
+  return '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<title>' + escapeHtml(title) + "</title>\n<style>\n" + css + "\n</style>\n</head>\n<body>\n<h1>" + escapeHtml(title) + "</h1>\n" + bodyHtml + "\n</body>\n</html>";
 }
 async function convertFile(app, file, theme) {
   const content = await app.vault.read(file);
@@ -336,7 +276,7 @@ var MD2HESettingTab = class extends import_obsidian.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     new import_obsidian.Setting(containerEl).setName("Display").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Output theme").setDesc("Color theme for generated HTML").addDropdown((d) => d.addOption("dark", "Dark").addOption("light", "Light").setValue(this.plugin.settings.theme).onChange(async (v) => {
+    new import_obsidian.Setting(containerEl).setName("Output theme").setDesc("Color theme for generated HTML files").addDropdown((d) => d.addOption("dark", "Dark").addOption("light", "Light").setValue(this.plugin.settings.theme).onChange(async (v) => {
       this.plugin.settings.theme = v;
       await this.plugin.saveSettings();
     }));
