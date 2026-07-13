@@ -198,8 +198,7 @@ export default class MD2HEPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const data: Record<string, unknown> | null = await this.loadData() as Record<string, unknown> | null;
 		if (data && typeof data === 'object') {
-			const o = data as Record<string, unknown>;
-			if (o.theme === 'light') this.settings.theme = 'light';
+			if (data.theme === 'light') this.settings.theme = 'light';
 		}
 	}
 

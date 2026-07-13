@@ -258,8 +258,7 @@ var MD2HEPlugin = class extends import_obsidian.Plugin {
   async loadSettings() {
     const data = await this.loadData();
     if (data && typeof data === "object") {
-      const o = data;
-      if (o.theme === "light")
+      if (data.theme === "light")
         this.settings.theme = "light";
     }
   }
