@@ -1,1 +1,10 @@
-{"id":"md-to-html-effect","name":"MD to HTML Effectiveness","version":"1.0.24","minAppVersion":"1.7.0","description":"Render spatial HTML in notes — compare, timeline, diagram (SVG), report, slides. Export as standalone HTML with zoom controls. Based on html-effectiveness methodology.","author":"rosswang","authorUrl":"https://github.com/yanqingwang","isDesktopOnly":false}
+{
+	"id": "md-to-html-effect",
+	"name": "MD to HTML Effectiveness",
+	"version": "1.0.25",
+	"minAppVersion": "1.7.0",
+	"description": "Render spatial HTML in notes — compare, timeline, diagram (SVG), report, slides. Export as standalone HTML with zoom controls. Based on html-effectiveness methodology.",
+	"author": "rosswang",
+	"authorUrl": "https://github.com/yanqingwang",
+	"isDesktopOnly": false
+}
