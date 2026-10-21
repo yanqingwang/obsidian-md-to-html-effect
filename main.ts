@@ -1,204 +1,1243 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice, TFile } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, MarkdownPostProcessorContext, parseYaml, Notice, ItemView, WorkspaceLeaf, TFile, MarkdownRenderer, Component } from 'obsidian';
 
-interface MD2HESettings { theme: 'dark' | 'light'; }
-const DEFAULT_SETTINGS: MD2HESettings = { theme: 'dark' };
+const VIEW_TYPE = 'html-effectiveness-view';
+
+interface HESettings {
+	defaultTheme: 'dark' | 'light';
+}
+const DEFAULT_SETTINGS: HESettings = { defaultTheme: 'dark' };
+
+type TemplateType = 'compare' | 'timeline' | 'diagram' | 'report' | 'slides';
 
 function escapeHtml(s: string): string {
-	return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-const CSS_DARK = `
-* { margin:0;padding:0;box-sizing:border-box; }
-body { background:#0d1117;color:#c9d1d9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;padding:24px;max-width:1000px;margin:0 auto;line-height:1.7; }
-h1 { color:#58a6ff;font-size:28px;margin:32px 0 12px; }
-h2 { color:#f0883e;font-size:22px;margin:28px 0 10px;border-bottom:1px solid #30363d;padding-bottom:8px; }
-h3 { color:#d2a8ff;font-size:17px;margin:24px 0 8px; }
-a { color:#58a6ff;text-decoration:none; }
-a:hover { text-decoration:underline; }
-strong { color:#f0f6fc; }
-code { background:#21262d;padding:2px 6px;border-radius:4px;font-size:.9em;font-family:'SFMono-Regular',Consolas,monospace; }
-pre { background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px;overflow:auto;margin:12px 0; }
-pre code { background:none;padding:0;border-radius:0; }
-table { width:100%;border-collapse:collapse;margin:12px 0;font-size:14px; }
-th { background:#161b22;color:#8b949e;padding:10px 8px;border-bottom:1px solid #30363d;text-align:left;font-weight:600; }
-td { padding:10px 8px;border-bottom:1px solid #21262d; }
-tr:hover { background:#161b22; }
-ul,ol { margin:8px 0;padding-left:24px; }
-li { margin:4px 0; }
-blockquote { border-left:3px solid #30363d;padding:8px 16px;margin:12px 0;color:#8b949e;background:#161b22;border-radius:0 8px 8px 0; }
-img { max-width:100%;border-radius:8px;margin:12px 0; }
-hr { border:none;border-top:1px solid #30363d;margin:24px 0; }
-p { margin:12px 0; }
-@media (max-width:768px){body{padding:16px;}}`;
-
-const CSS_LIGHT = CSS_DARK
-	.replace(/#0d1117/g,'#ffffff').replace(/#c9d1d9/g,'#1f2328')
-	.replace(/#161b22/g,'#f6f8fa').replace(/#30363d/g,'#d0d7de')
-	.replace(/#21262d/g,'#e8ecf0').replace(/#58a6ff/g,'#0969da')
-	.replace(/#f0883e/g,'#bd561d').replace(/#d2a8ff/g,'#8250df')
-	.replace(/#8b949e/g,'#656d76').replace(/#f0f6fc/g,'#1f2328');
-
-function stripFrontmatter(lines: string[]): string[] {
-	if (lines.length > 0 && lines[0].trim() === '---') {
-		for (let i = 1; i < lines.length; i++) {
-			if (lines[i].trim() === '---') {
-				return lines.slice(i + 1);
-			}
-		}
-	}
-	return lines;
+/**
+ * True when the page lays itself out against the viewport, in which case the zoom
+ * wrapper must not be injected.
+ *
+ * The wrapper moves every body child into a content-sized `.zoom-container` and
+ * scales it. That is fine for static reports, but a viewport-layout page loses its
+ * containing block: percentage heights collapse, a canvas is re-measured from its
+ * own aspect ratio, and pointer hit-testing (clientWidth/clientHeight vs
+ * getBoundingClientRect) lands off target, so clicks select the wrong node.
+ *
+ * Detected cases:
+ *   - `<canvas>`: interactive canvas apps size themselves to the frame.
+ *   - html/body with `height: 100%` or `100vh`: full-viewport layout.
+ *   - `<meta name="he-no-zoom">`: explicit opt-out for anything else.
+ */
+function isViewportLayoutPage(html: string): boolean {
+        if (/<meta[^>]+name\s*=\s*["']he-no-zoom["']/i.test(html)) return true;
+        if (/<canvas[\s>]/i.test(html)) return true;
+        return /(?:^|[;{}\s>])(?:html\s*,\s*body|body|html)\s*\{[^}]*height\s*:\s*100(?:vh|%)/i.test(html);
 }
 
-function mdToHtml(md: string): string {
-	let lines = md.split('\n');
-	lines = stripFrontmatter(lines);
-	const html: string[] = [];
-	let inCode = false, codeLang = '', codeContent: string[] = [];
-	let inTableHeader = true;
-	let inList: string[] = [];
-	let listType = '';
-	let tableOpen = false;
+/**
+ * Obsidian stores the UI language in localStorage under `language` (e.g. `zh`, `en`).
+ * Read it directly so the plugin follows the app language without an extra setting.
+ */
+function isChineseUI(): boolean {
+        try {
+                const lang = window.localStorage.getItem('language');
+                if (lang) return lang.toLowerCase().startsWith('zh');
+        } catch {
+                // localStorage unavailable — fall through to the system locale
+        }
+        return (navigator.language || '').toLowerCase().startsWith('zh');
+}
 
-	function flushList() {
-		if (inList.length) {
-			html.push('<' + listType + '>' + inList.join('') + '</' + listType + '>');
-			inList = []; listType = '';
-		}
-	}
-	function flushTable() {
-		if (tableOpen) { html.push('</tbody></table>'); tableOpen = false; }
-	}
+/** Pick the Chinese string when Obsidian's UI language is Chinese, English otherwise. */
+function t(en: string, zh: string): string {
+        return isChineseUI() ? zh : en;
+}
 
-	for (let i = 0; i < lines.length; i++) {
+function applyMd(parent: HTMLElement, text: string): void {
+	const lines = text.split('\n');
+	let i = 0;
+
+	while (i < lines.length) {
 		const line = lines[i];
 
-		if (inCode) {
-			if (line.startsWith('```')) {
-				html.push('<pre><code' + (codeLang ? ' class="language-' + escapeHtml(codeLang) + '"' : '') + '>' + escapeHtml(codeContent.join('\n')) + '</code></pre>');
-				inCode = false; codeLang = ''; codeContent = [];
-				continue;
+		// Code block (triple backtick)
+		if (line.trimStart().startsWith('```')) {
+			const lang = line.trimStart().slice(3).trim();
+			const codeLines: string[] = [];
+			i++;
+			while (i < lines.length && !lines[i].trimStart().startsWith('```')) {
+				codeLines.push(lines[i]);
+				i++;
 			}
-			codeContent.push(line); continue;
-		}
-
-		if (line.startsWith('```')) { inCode = true; codeLang = line.slice(3).trim(); codeContent = []; continue; }
-
-		if (line.startsWith('|') && line.endsWith('|')) {
-			flushList();
-			const cells = line.split('|').filter(c => c.trim());
-			if (cells.length && cells.every(c => /^[-:]+$/.test(c.trim()))) { inTableHeader = false; continue; }
-			if (!tableOpen) { html.push('<table><thead></thead><tbody>'); tableOpen = true; inTableHeader = true; }
-			const tag = inTableHeader ? 'th' : 'td';
-			html.push('<tr>' + cells.map(c => '<' + tag + '>' + parseInline(c.trim()) + '</' + tag + '>').join('') + '</tr>');
+			i++; // skip closing ```
+			const pre = parent.createEl('pre');
+			const code = pre.createEl('code');
+			if (lang) code.addClass('language-' + lang);
+			code.textContent = codeLines.join('\n');
 			continue;
 		}
 
-		if (line.trim() === '---' && tableOpen) { flushTable(); continue; }
-		flushTable();
-
-		if (line.startsWith('# ')) { flushList(); html.push('<h1>' + parseInline(line.slice(2).trim()) + '</h1>'); continue; }
-		if (line.startsWith('## ')) { flushList(); html.push('<h2>' + parseInline(line.slice(3).trim()) + '</h2>'); continue; }
-		if (line.startsWith('### ')) { flushList(); html.push('<h3>' + parseInline(line.slice(4).trim()) + '</h3>'); continue; }
-		if (line.startsWith('#### ')) { flushList(); html.push('<h4>' + parseInline(line.slice(5).trim()) + '</h4>'); continue; }
-
-		if (line.startsWith('- ') || line.startsWith('* ')) {
-			if (listType !== 'ul') { flushList(); listType = 'ul'; }
-			inList.push('<li>' + parseInline(line.slice(2).trim()) + '</li>'); continue;
-		}
-		if (/^\d+\.\s/.test(line)) {
-			if (listType !== 'ol') { flushList(); listType = 'ol'; }
-			inList.push('<li>' + parseInline(line.replace(/^\d+\.\s*/, '').trim()) + '</li>'); continue;
+		// Blockquote
+		if (line.trimStart().startsWith('> ')) {
+			const bq = parent.createEl('blockquote');
+			const quoteLines: string[] = [];
+			while (i < lines.length && lines[i].trimStart().startsWith('> ')) {
+				quoteLines.push(lines[i].trimStart().slice(2));
+				i++;
+			}
+			applyInline(bq, quoteLines.join('\n'));
+			continue;
 		}
 
-		if (inList.length && (!line.trim() || line.startsWith('#'))) { flushList(); }
+		// Unordered list
+		if (line.trimStart().match(/^[-*]\s/)) {
+			const ul = parent.createEl('ul');
+			while (i < lines.length && lines[i].trimStart().match(/^[-*]\s/)) {
+				const li = ul.createEl('li');
+				applyInline(li, lines[i].trimStart().slice(2));
+				i++;
+			}
+			continue;
+		}
 
-		if (line.startsWith('> ')) { flushList(); html.push('<blockquote>' + parseInline(line.slice(2).trim()) + '</blockquote>'); continue; }
-		if (line.trim() === '---' || line.trim() === '***' || line.trim() === '___') { flushList(); html.push('<hr>'); continue; }
-		if (line.trim() === '') { continue; }
+		// Ordered list
+		if (line.trimStart().match(/^\d+\.\s/)) {
+			const ol = parent.createEl('ol');
+			while (i < lines.length && lines[i].trimStart().match(/^\d+\.\s/)) {
+				const li = ol.createEl('li');
+				applyInline(li, lines[i].trimStart().replace(/^\d+\.\s*/, ''));
+				i++;
+			}
+			continue;
+		}
 
-		html.push('<p>' + parseInline(line) + '</p>');
+		// Heading
+		const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
+		if (headingMatch) {
+			const level = Math.min(headingMatch[1].length, 6) as 1 | 2 | 3 | 4 | 5 | 6;
+			const h = parent.createEl('h' + level as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6');
+			applyInline(h, headingMatch[2]);
+			i++;
+			continue;
+		}
+
+		// Horizontal rule
+		if (line.match(/^---+\s*$/)) {
+			parent.createEl('hr');
+			i++;
+			continue;
+		}
+
+		// Empty line = paragraph break
+		if (line.trim() === '') {
+			i++;
+			continue;
+		}
+
+		// Regular paragraph
+		const p = parent.createEl('p');
+		applyInline(p, line);
+		i++;
+	}
+}
+
+function applyInline(parent: HTMLElement, text: string): void {
+	// Escape HTML entities first
+	const escaped = text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;');
+
+	// Parse inline markdown patterns by splitting into tokens
+	const parts: Array<{ type: string; content: string }> = [];
+	let lastIndex = 0;
+	let match: RegExpExecArray | null;
+	const regex = /(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_|`[^`]+`|~~[^~]+~~|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\))/g;
+
+	while ((match = regex.exec(escaped)) !== null) {
+		// Text before this match
+		if (match.index > lastIndex) {
+			parts.push({ type: 'text', content: escaped.slice(lastIndex, match.index) });
+		}
+
+		const full = match[0];
+		if (full.startsWith('**') || full.startsWith('__')) {
+			parts.push({ type: 'bold', content: full.slice(2, -2) });
+		} else if (full.startsWith('*') && !full.startsWith('**')) {
+			parts.push({ type: 'italic', content: full.slice(1, -1) });
+		} else if (full.startsWith('_') && !full.startsWith('__')) {
+			parts.push({ type: 'italic', content: full.slice(1, -1) });
+		} else if (full.startsWith('`')) {
+			parts.push({ type: 'code', content: full.slice(1, -1) });
+		} else if (full.startsWith('~~')) {
+			parts.push({ type: 'del', content: full.slice(2, -2) });
+		} else if (full.startsWith('![')) {
+			const alt = match[2] || '';
+			const src = match[3] || '';
+			parts.push({ type: 'image', content: JSON.stringify({ alt, src }) });
+		} else if (full.startsWith('[')) {
+			const linkText = match[4] || full.slice(1, full.indexOf(']'));
+			const url = match[5] || '';
+			parts.push({ type: 'link', content: JSON.stringify({ text: linkText, url }) });
+		}
+
+		lastIndex = match.index + full.length;
 	}
 
-	flushList(); flushTable();
-	if (inCode) html.push('<pre><code>' + escapeHtml(codeContent.join('\n')) + '</code></pre>');
-	return html.join('\n');
-}
+	// Remaining text
+	if (lastIndex < escaped.length) {
+		parts.push({ type: 'text', content: escaped.slice(lastIndex) });
+	}
 
-function parseInline(text: string): string {
-	return escapeHtml(text)
-		.replace(/`([^`]+)`/g, '<code>$1</code>')
-		.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-		.replace(/__(.+?)__/g, '<strong>$1</strong>')
-		.replace(/\*(.+?)\*/g, '<em>$1</em>')
-		.replace(/_(.+?)_/g, '<em>$1</em>')
-		.replace(/!\[(.+?)\]\((.+?)\)/g, '<img alt="$1" src="$2">')
-		.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, '<a href="$1">$2$1</a>')
-		.replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2">$1</a>');
-}
-
-function buildHtml(title: string, bodyHtml: string, theme: string): string {
-	const css = theme === 'light' ? CSS_LIGHT : CSS_DARK;
-	return '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<title>' + escapeHtml(title) + '</title>\n<style>\n' + css + '\n</style>\n</head>\n<body>\n<h1>' + escapeHtml(title) + '</h1>\n' + bodyHtml + '\n</body>\n</html>';
-}
-
-async function convertFile(app: App, file: TFile, theme: string): Promise<void> {
-	const content = await app.vault.read(file);
-	const htmlContent = mdToHtml(content);
-	const outPath = file.parent ? file.parent.path + '/' + file.basename + '.html' : file.basename + '.html';
-	if (app.vault.getFileByPath(outPath)) {
-		new Notice('HTML file already exists: ' + outPath);
+	// If no matches, just set text content
+	if (parts.length === 0) {
+		parent.appendChild(parent.ownerDocument.createTextNode(escaped));
 		return;
 	}
-	await app.vault.create(outPath, buildHtml(file.basename, htmlContent, theme));
-	new Notice('Converted: ' + outPath);
+
+	// Render parts
+	for (const part of parts) {
+		switch (part.type) {
+			case 'text':
+				parent.appendChild(parent.ownerDocument.createTextNode(part.content));
+				break;
+			case 'bold':
+				parent.createEl('strong', { text: part.content });
+				break;
+			case 'italic':
+				parent.createEl('em', { text: part.content });
+				break;
+			case 'code':
+				parent.createEl('code', { cls: 'he-inline-code', text: part.content });
+				break;
+			case 'del':
+				parent.createEl('del', { text: part.content });
+				break;
+			case 'link': {
+				const data: { text: string; url: string } = JSON.parse(part.content);
+				parent.createEl('a', { text: data.text, href: data.url });
+				break;
+			}
+			case 'image': {
+				const data: { src: string; alt: string } = JSON.parse(part.content);
+				parent.createEl('img', { attr: { src: data.src, alt: data.alt } });
+				break;
+			}
+		}
+	}
 }
 
-export default class MD2HEPlugin extends Plugin {
-	settings: MD2HESettings = DEFAULT_SETTINGS;
+function buildCompare(parent: HTMLElement, content: string, theme: string): void {
+	const outer = parent.createDiv({ cls: 'he-compare ' + theme });
+
+	// ── step 1: parse columns from content ──
+	interface Col {
+		tag: string;
+		title: string;
+		codeBlock: { lang: string; code: string } | null;
+		pros: string[];
+		cons: string[];
+		metrics: string[];
+		bodyLines: string[];
+	}
+
+	const cols: Col[] = [];
+	let cur: Col | null = null;
+	let nextTag = '';
+	const lines = content.split('\n');
+	let i = 0;
+
+	function flush() {
+		if (cur && (cur.title || cur.bodyLines.length > 0 || cur.codeBlock || cur.pros.length > 0 || cur.cons.length > 0 || cur.metrics.length > 0)) {
+			cols.push(cur);
+		}
+	}
+
+	while (i < lines.length) {
+		const line = lines[i];
+
+		// separator with tag
+		const tagSep = line.match(/^---tag:\s*(.+)/);
+		if (tagSep) { flush(); nextTag = tagSep[1]; cur = null; i++; continue; }
+
+		// plain separator
+		if (/^---+\s*$/.test(line)) { flush(); cur = null; i++; continue; }
+
+		if (!cur) {
+			cur = { tag: nextTag, title: '', codeBlock: null, pros: [], cons: [], metrics: [], bodyLines: [] };
+			nextTag = '';
+		}
+
+		// title (first # line only)
+		const tm = line.match(/^#\s+(.+)/);
+		if (tm && !cur.title) { cur.title = tm[1]; i++; continue; }
+
+		if (/^```/.test(line)) {
+			const lang = line.replace(/^```/, '').trim();
+			const codeLines: string[] = [];
+			i++;
+			while (i < lines.length && !/^```/.test(lines[i])) { codeLines.push(lines[i]); i++; }
+			i++;
+			cur.codeBlock = { lang, code: codeLines.join('\n') };
+			continue;
+		}
+
+		if (/^###\s+Metrics\s*$/i.test(line)) {
+			i++;
+			while (i < lines.length && lines[i].trim() !== '' && !/^---/.test(lines[i]) && !/^#{1,3}\s/.test(lines[i]) && !/^```/.test(lines[i])) {
+				cur.metrics.push(lines[i]); i++;
+			}
+			continue;
+		}
+
+		// pro/con table (pipe table with Pro and Con in header)
+		if (/^\|.*\|\s*$/.test(line) && /Pro/i.test(line) && /Con/i.test(line)) {
+			i++;
+			if (i < lines.length && /^\|[\s:-]+\|/.test(lines[i])) i++;
+			while (i < lines.length && /^\|.*\|\s*$/.test(lines[i])) {
+				const parts = lines[i].split('|').filter((c: string) => c.trim() !== '').map((c: string) => c.trim());
+				if (parts.length >= 2) { cur.pros.push(parts[0]); cur.cons.push(parts[1]); }
+				else if (parts.length === 1) { cur.pros.push(parts[0]); cur.cons.push(''); }
+				i++;
+			}
+			continue;
+		}
+
+		cur.bodyLines.push(line);
+		i++;
+	}
+	flush();
+
+	// ── step 2: extract recommendation from last column if present ──
+	let recommendation: string | null = null;
+	if (cols.length > 0) {
+		const last = cols[cols.length - 1];
+		const bodyJoined = last.bodyLines.join('\n');
+		const recMatch = bodyJoined.match(/^##\s+(?:Recommendation|建议):?\s*\n([\s\S]*)$/);
+		if (recMatch) {
+			recommendation = recMatch[1].trim();
+			cols.pop();
+		} else {
+			const recInline = bodyJoined.match(/##\s+(?:Recommendation|建议):?\s*\n([\s\S]*)$/);
+			if (recInline) {
+				recommendation = recInline[1].trim();
+				const beforeRec = bodyJoined.replace(/##\s+(?:Recommendation|建议):?\s*\n[\s\S]*$/, '').trim();
+				last.bodyLines = beforeRec ? beforeRec.split('\n') : [];
+			}
+		}
+	}
+
+	// ── step 3: render approach cards ──
+	for (const col of cols) {
+		const card = outer.createDiv({ cls: 'he-approach' });
+
+		const header = card.createDiv({ cls: 'he-approach-header' });
+		if (col.tag) {
+			header.createSpan({ cls: 'he-tag', text: escapeHtml(col.tag) });
+		}
+		if (col.title) {
+			header.createEl('h2', { cls: 'he-approach-title', text: escapeHtml(col.title) });
+		}
+
+		if (col.codeBlock) {
+			const pre = card.createEl('pre', { cls: 'he-approach-code' });
+			const code = pre.createEl('code');
+			if (col.codeBlock.lang) code.addClass('language-' + col.codeBlock.lang);
+			code.textContent = col.codeBlock.code;
+		}
+
+		if (col.pros.length > 0 || col.cons.length > 0) {
+			const table = card.createEl('table', { cls: 'he-proscons' });
+			const thead = table.createEl('thead');
+			const hr = thead.createEl('tr');
+			hr.createEl('th', { text: 'Pro' });
+			hr.createEl('th', { text: 'Con' });
+			const tbody = table.createEl('tbody');
+			const maxRows = Math.max(col.pros.length, col.cons.length);
+			for (let r = 0; r < maxRows; r++) {
+				const tr = tbody.createEl('tr');
+				tr.createEl('td', { text: escapeHtml(col.pros[r] || '') });
+				tr.createEl('td', { text: escapeHtml(col.cons[r] || '') });
+			}
+		}
+
+		if (col.bodyLines.length > 0) {
+			const bodyDiv = card.createDiv({ cls: 'he-approach-body' });
+			applyMd(bodyDiv, col.bodyLines.join('\n'));
+		}
+
+		if (col.metrics.length > 0) {
+			const footer = card.createEl('footer', { cls: 'he-metrics' });
+			for (const mLine of col.metrics) {
+				const span = footer.createEl('span');
+				applyInline(span, mLine);
+			}
+		}
+	}
+
+	// ── step 4: recommendation banner ──
+	if (recommendation) {
+		const banner = outer.createDiv({ cls: 'he-recommendation' });
+		banner.createEl('strong', { text: 'Recommendation: ' });
+		banner.appendChild(banner.ownerDocument.createTextNode(' '));
+		applyInline(banner, recommendation);
+	}
+}
+
+function buildTimeline(parent: HTMLElement, content: string): void {
+	const ul = parent.createEl('ul', { cls: 'he-timeline' });
+	const items = content.trim().split('\n').filter(l => l.trim());
+	for (const line of items) {
+		const li = ul.createEl('li', { cls: 'he-tl-item' });
+
+		// Strip leading `- ` list marker
+		let body = line.replace(/^-\s+/, '');
+
+		// Parse optional [date] at the beginning
+		let dateStr: string | null = null;
+		const dateMatch = body.match(/^\[(.+?)\]\s*/);
+		if (dateMatch) {
+			dateStr = dateMatch[1];
+			body = body.slice(dateMatch[0].length);
+		}
+
+		// Parse optional [sev:high|med|low] at the end
+		let sev: string | null = null;
+		const sevMatch = body.match(/\s*\[sev:(high|med|low)\]\s*$/i);
+		if (sevMatch) {
+			body = body.slice(0, sevMatch.index);
+			sev = sevMatch[1].toLowerCase();
+		}
+
+		// Date pill
+		if (dateStr) {
+			li.createSpan({ cls: 'he-tl-date', text: dateStr });
+		}
+
+		// Body text with full markdown rendering (bold, italic, code, links, etc.)
+		const textSpan = li.createSpan({ cls: 'he-tl-text' });
+		applyMd(textSpan, body);
+
+		// Severity badge + left-border accent
+		if (sev) {
+			li.createSpan({ cls: 'he-tl-sev ' + sev, text: sev.charAt(0).toUpperCase() + sev.slice(1) });
+			li.classList.add('sev-' + sev);
+		}
+	}
+}
+
+function buildDiagram(parent: HTMLElement, content: string): void {
+	const d = parent.createDiv({ cls: 'he-diagram' });
+	const lines = content.split('\n');
+
+	// ---- Detect box-arrow format: lines starting with [( or { or box-drawing chars (┌│└) ----
+	const hasBoxArrow = lines.some(l => /^\s*[[({\u250c\u2502\u2514]/.test(l.trim()));
+	if (!hasBoxArrow) {
+		// Fallback: styled ASCII (keep original behavior)
+		d.createEl('pre', { cls: 'he-diagram-pre', text: escapeHtml(content) });
+		return;
+	}
+
+	// ---- Constants ----
+	const NODE_H = 56;
+	const GAP_X = 40;
+	const GAP_Y = 80;
+	const PAD = 24;
+
+	// ---- Parse text format into nodes ----
+	const nodes: Array<{
+		text: string;
+		type: 'process' | 'terminal' | 'decision';
+		row: number;
+		col: number;
+		w: number;
+		x: number;
+		y: number;
+	}> = [];
+	const rowCols: number[] = [];
+
+	for (const raw of lines) {
+		const line = raw.trimEnd();
+		if (!line) continue;
+		const indent = raw.length - raw.trimStart().length;
+		const row = Math.round(indent / 2);
+
+		const pushNode = (text: string, type: 'process' | 'terminal' | 'decision') => {
+			const col = rowCols[row] ?? 0;
+			rowCols[row] = col + 1;
+			// Dynamic width: ~7.2px/char at 13px font + padding, capped at 300
+			const w = Math.max(120, Math.min(text.length * 7.2 + 30, 300));
+			nodes.push({ text, type, row, col, w, x: 0, y: 0 });
+		};
+
+		const pm = /^\[([^\]]+)\]/.exec(line);
+		if (pm) { pushNode(pm[1], 'process'); continue; }
+
+		const tm = /^\(([^)]+)\)/.exec(line);
+		if (tm) { pushNode(tm[1], 'terminal'); continue; }
+
+		const dm = /^\{([^}]+)\}/.exec(line);
+		if (dm) { pushNode(dm[1], 'decision'); continue; }
+	}
+
+	if (nodes.length === 0) {
+		d.createEl('pre', { cls: 'he-diagram-pre', text: escapeHtml(content) });
+		return;
+	}
+
+	// ---- Grid layout ----
+	for (const n of nodes) {
+		const sameRow = nodes.filter(o => o.row === n.row).sort((a, b) => a.col - b.col);
+		let x = PAD;
+		for (const rn of sameRow) {
+			if (rn.col < n.col) x += rn.w + GAP_X;
+		}
+		n.x = x;
+		n.y = n.row * (NODE_H + GAP_Y) + PAD;
+	}
+
+	const svgW = Math.max(...nodes.map(n => n.x + n.w + PAD), 200);
+	const svgH = Math.max(...nodes.map(n => n.y + NODE_H + PAD), 100);
+
+	// ---- Build SVG ----
+	const NS = 'http://www.w3.org/2000/svg';
+	const svg = parent.ownerDocument.createElementNS(NS, 'svg');
+	svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+
+	const defs = parent.ownerDocument.createElementNS(NS, 'defs');
+	const marker = parent.ownerDocument.createElementNS(NS, 'marker');
+	marker.setAttribute('id', 'arr');
+	marker.setAttribute('viewBox', '0 0 10 10');
+	marker.setAttribute('refX', '9');
+	marker.setAttribute('refY', '5');
+	marker.setAttribute('markerWidth', '6');
+	marker.setAttribute('markerHeight', '6');
+	marker.setAttribute('orient', 'auto-start-reverse');
+	const mpath = parent.ownerDocument.createElementNS(NS, 'path');
+	mpath.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+	mpath.setAttribute('fill', '#141413');
+	marker.appendChild(mpath);
+	defs.appendChild(marker);
+	svg.appendChild(defs);
+
+	function addPath(d: string, cls = 'edge') {
+		const el = parent.ownerDocument.createElementNS(NS, 'path');
+		el.setAttribute('d', d);
+		el.setAttribute('class', cls);
+		el.setAttribute('marker-end', 'url(#arr)');
+		svg.appendChild(el);
+	}
+
+	// Edges
+	for (const n of nodes) {
+		const next = nodes.find(o => o.row === n.row && o.col === n.col + 1);
+		if (next) {
+			addPath(`M ${n.x + n.w} ${n.y + NODE_H / 2} L ${next.x} ${next.y + NODE_H / 2}`);
+		}
+		const below = nodes.find(o => o.row === n.row + 1 && o.col === n.col);
+		if (below) {
+			const x1 = n.x + n.w / 2, y1 = n.y + NODE_H;
+			const x2 = below.x + below.w / 2, y2 = below.y;
+			if (Math.abs(x1 - x2) > 2) {
+				const my = (y1 + y2) / 2;
+				addPath(`M ${x1} ${y1} L ${x1} ${my} L ${x2} ${my} L ${x2} ${y2}`);
+			} else {
+				addPath(`M ${x1} ${y1} L ${x2} ${y2}`);
+			}
+		}
+	}
+
+	// Nodes
+	for (const n of nodes) {
+		const cx = n.x + n.w / 2, cy = n.y + NODE_H / 2;
+		const label = n.text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		let shape: SVGElement;
+		switch (n.type) {
+			case 'process':
+				shape = parent.ownerDocument.createElementNS(NS, 'rect');
+				shape.setAttribute('x', String(n.x));
+				shape.setAttribute('y', String(n.y));
+				shape.setAttribute('width', String(n.w));
+				shape.setAttribute('height', String(NODE_H));
+				shape.setAttribute('rx', '8');
+				break;
+			case 'terminal':
+				shape = parent.ownerDocument.createElementNS(NS, 'rect');
+				shape.setAttribute('x', String(n.x));
+				shape.setAttribute('y', String(n.y));
+				shape.setAttribute('width', String(n.w));
+				shape.setAttribute('height', String(NODE_H));
+				shape.setAttribute('rx', String(NODE_H / 2));
+				break;
+			case 'decision':
+				shape = parent.ownerDocument.createElementNS(NS, 'polygon');
+				shape.setAttribute('points', `${cx},${n.y} ${n.x + n.w},${cy} ${cx},${n.y + NODE_H} ${n.x},${cy}`);
+				break;
+		}
+		shape.setAttribute('class', 'node-bg');
+		svg.appendChild(shape);
+		const text = parent.ownerDocument.createElementNS(NS, 'text');
+		text.setAttribute('x', String(cx));
+		text.setAttribute('y', String(cy));
+		text.setAttribute('class', 'node-label');
+		text.setAttribute('text-anchor', 'middle');
+		text.setAttribute('dominant-baseline', 'central');
+		text.textContent = label;
+		svg.appendChild(text);
+	}
+
+	d.insertBefore(svg, d.firstChild);
+
+	// ---- Legend ----
+	const leg = d.createDiv({ cls: 'he-diagram-caption' });
+	function legItem(swatchCls: string, label: string) {
+		const span = leg.createSpan({ cls: 'legend-item' });
+		span.createSpan({ cls: 'legend-swatch ' + swatchCls });
+		span.appendText(' ' + label);
+	}
+	legItem('process', 'process');
+	legItem('terminal', 'terminal');
+	legItem('decision', 'decision');
+}
+
+function buildReport(parent: HTMLElement, content: string, theme: string): void {
+	const outer = parent.createDiv({ cls: 'he-report ' + theme });
+	const lines = content.trim().split('\n');
+
+	type Section = 'none' | 'kpi' | 'highlights' | 'shipped' | 'velocity' | 'carryover' | 'body';
+	let section: Section = 'none';
+
+	let kpiRow: HTMLElement | null = null;
+	let highlightsUl: HTMLElement | null = null;
+	let shippedThead: HTMLElement | null = null;
+	let shippedTbody: HTMLElement | null = null;
+	let shippedFirstRow = true;
+	let velocityChart: HTMLElement | null = null;
+	let carryoverDiv: HTMLElement | null = null;
+	const bodyDiv = outer.createDiv({ cls: 'he-report-body' });
+
+	for (const rawLine of lines) {
+		const line = rawLine.trim();
+		if (!line) continue;
+
+		if (line.startsWith('## ')) {
+			const title = line.slice(3).trim();
+			if (title === '' || title === 'KPI') {
+				section = 'kpi';
+				kpiRow = outer.createDiv({ cls: 'he-kpi-row' });
+				continue;
+			}
+			bodyDiv.createEl('h4', { cls: 'he-report-h3', text: escapeHtml(title) });
+			continue;
+		}
+
+		const h1Match = line.match(/^#\s+(.+)/);
+		if (h1Match) {
+			const title = h1Match[1];
+			section = 'body';
+			shippedFirstRow = true;
+
+			switch (title) {
+				case 'Highlights': {
+					section = 'highlights';
+					const hlSec = outer.createDiv({ cls: 'he-highlights' });
+					highlightsUl = hlSec.createEl('ul');
+					break;
+				}
+				case 'Shipped': {
+					section = 'shipped';
+					const tbl = outer.createEl('table', { cls: 'he-shipped' });
+					shippedThead = tbl.createEl('thead');
+					shippedTbody = tbl.createEl('tbody');
+					break;
+				}
+				case 'Velocity': {
+					section = 'velocity';
+					const velSec = outer.createDiv({ cls: 'he-velocity' });
+					velocityChart = velSec.createDiv({ cls: 'chart' });
+					break;
+				}
+				case 'Carryover': {
+					section = 'carryover';
+					carryoverDiv = outer.createDiv({ cls: 'he-carryover' });
+					break;
+				}
+				default:
+					bodyDiv.createEl('h3', { cls: 'he-report-h3', text: escapeHtml(title) });
+					break;
+			}
+			continue;
+		}
+
+		switch (section) {
+			case 'kpi': {
+				if (!kpiRow) break;
+				const km = line.match(/^-\s*(\d+(?:\.\d+)?[%MBTk]?)\s*:\s*(.+?)(?:\s*\(delta:\s*([+-]?±?\d+(?:\.\d+)?[%MBTk]?)\))?\s*$/);
+				if (km) {
+					const k = kpiRow.createDiv({ cls: 'he-kpi' });
+					k.createDiv({ cls: 'he-kpi-num', text: escapeHtml(km[1]) });
+					k.createDiv({ cls: 'he-kpi-label', text: escapeHtml(km[2]) });
+					if (km[3]) {
+						const d = km[3];
+						const dc = d.startsWith('+') ? ' up' : d.startsWith('-') ? ' down' : '';
+						k.createDiv({ cls: 'he-kpi-delta' + dc, text: escapeHtml(d) });
+					}
+				}
+				break;
+			}
+
+			case 'highlights': {
+				if (!highlightsUl) break;
+				const hm = line.match(/^-\s+(.+)/);
+				if (hm) {
+					const li = highlightsUl.createEl('li');
+					applyInline(li, hm[1]);
+				}
+				break;
+			}
+
+			case 'shipped': {
+				if (!line.startsWith('|')) break;
+				if (shippedFirstRow && shippedThead) {
+					const tr = shippedThead.createEl('tr');
+					line.split('|').filter(Boolean).forEach(c =>
+						tr.createEl('th', { text: escapeHtml(c.trim()) })
+					);
+					shippedFirstRow = false;
+				} else if (shippedTbody) {
+					const tr = shippedTbody.createEl('tr');
+					const cells = line.split('|').filter(Boolean).map(c => c.trim());
+					cells.forEach((c, i) => {
+						const td = tr.createEl('td');
+						if (i === cells.length - 1 && /^(low|med|high)$/i.test(c)) {
+							td.createSpan({ cls: 'he-risk-pill ' + c.toLowerCase(), text: escapeHtml(c) });
+						} else {
+							td.textContent = c;
+						}
+					});
+				}
+				break;
+			}
+
+			case 'velocity': {
+				if (!velocityChart) break;
+				const parts = line.split(',').map(s => s.trim());
+				const entries: Array<{ day: string; val: number }> = [];
+				let maxVal = 0;
+				for (const part of parts) {
+					const vm = part.match(/^([A-Za-z]+):(\d+(?:\.\d+)?)/);
+					if (vm) {
+						const v = parseFloat(vm[2]);
+						entries.push({ day: vm[1], val: v });
+						if (v > maxVal) maxVal = v;
+					}
+				}
+				if (entries.length === 0) break;
+				const scale = maxVal || 1;
+				for (const { day, val } of entries) {
+					const bar = velocityChart.createDiv({ cls: 'bar' });
+					const col = bar.createDiv({ cls: 'col' });
+					col.style.height = (val / scale * 100) + '%';
+					col.setAttribute('data-v', String(val));
+					bar.createEl('small', { text: day });
+				}
+				break;
+			}
+
+			case 'carryover': {
+				if (!carryoverDiv) break;
+				const cm = line.match(/^-\s*\[(.+?)\]\s*(.+)/);
+				if (cm) {
+					const status = cm[1].toLowerCase();
+					const desc = cm[2];
+					const item = carryoverDiv.createDiv({ cls: 'item ' + status });
+					item.createSpan({ cls: 'label', text: escapeHtml(status) });
+					const descSpan = item.createSpan({ cls: 'desc' });
+					applyInline(descSpan, desc);
+				}
+				break;
+			}
+
+			default: {
+				const p = bodyDiv.createEl('p');
+				applyInline(p, line);
+				break;
+			}
+		}
+	}
+}
+
+function buildSlides(parent: HTMLElement, content: string): void {
+	const slides = content.split('\n---\n').filter(Boolean);
+	const slideDivs: HTMLDivElement[] = [];
+	let currentIdx = 0;
+	const nav = parent.createDiv({ cls: 'he-slides-nav' });
+	nav.createEl('button', { text: chr(0x25C0), cls: 'he-slide-btn' })
+		.addEventListener('click', () => { if (currentIdx > 0) showSlide(currentIdx - 1); });
+	const counter = nav.createSpan({ cls: 'he-slide-counter' });
+	nav.createEl('button', { text: chr(0x25B6), cls: 'he-slide-btn' })
+		.addEventListener('click', () => { if (currentIdx < slideDivs.length - 1) showSlide(currentIdx + 1); });
+	const wrap = parent.createDiv({ cls: 'he-slides' });
+	wrap.setAttribute('tabindex', '0');
+	function showSlide(idx: number) {
+		slideDivs.forEach((s, i) => s.classList.toggle('he-slide-hidden', i !== idx));
+		counter.textContent = (idx + 1) + ' / ' + slideDivs.length;
+		currentIdx = idx;
+	}
+	// Keyboard navigation
+	const keyHandler = (e: KeyboardEvent) => {
+		if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+			e.preventDefault();
+			if (currentIdx < slideDivs.length - 1) showSlide(currentIdx + 1);
+		} else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+			e.preventDefault();
+			if (currentIdx > 0) showSlide(currentIdx - 1);
+		} else if (e.key === 'Home' || e.key === '.') {
+			e.preventDefault();
+			showSlide(0);
+		} else if (e.key === 'End') {
+			e.preventDefault();
+			showSlide(slideDivs.length - 1);
+		} else if (e.key === 'f') {
+			e.preventDefault();
+			const doc = (e.target as HTMLElement).ownerDocument;
+			if (!doc.fullscreenElement) {
+				doc.documentElement.requestFullscreen().catch(() => {});
+			} else {
+				doc.exitFullscreen().catch(() => {});
+			}
+		}
+	};
+	parent.addEventListener('keydown', keyHandler);
+	for (let i = 0; i < slides.length; i++) {
+		const lines = slides[i].trim().split('\n');
+		const title = lines.shift()?.replace(/^#\s*/, '') || '';
+		const sd = wrap.createDiv({ cls: 'he-slide', attr: { 'data-index': String(i) } });
+		if (i > 0) sd.classList.add('he-slide-hidden');
+		sd.createEl('h2', { cls: 'he-slide-title', text: escapeHtml(title) });
+		const sb = sd.createDiv({ cls: 'he-slide-body' });
+		applyMd(sb, lines.join('\n'));
+		slideDivs.push(sd);
+	}
+	showSlide(0);
+	const help = parent.createDiv({ cls: 'he-slides-help' });
+	help.createSpan({ text: t('\u2190 \u2192 or Space: navigate \u00b7 f: fullscreen \u00b7 Home/End: first/last', '\u2190 \u2192 或空格：翻页 \u00b7 f：全屏 \u00b7 Home/End：首/尾页') });
+}
+
+function chr(c: number): string { return String.fromCharCode(c); }
+
+function processor(source: string, el: HTMLElement, _ctx: MarkdownPostProcessorContext, defaultTheme: string): void {
+	let type: TemplateType = 'report';
+	let theme = defaultTheme === 'light' ? 'light' : 'dark';
+	let content = source;
+	const nl = source.indexOf('\n');
+	if (nl > 0) {
+		const fl = source.substring(0, nl).trim();
+		if (fl.startsWith('---')) {
+			const end = source.indexOf('---', 3);
+			if (end > 0) {
+				const yml = source.substring(3, end).trim();
+				try {
+					const parsed: Record<string, unknown> | null = parseYaml(yml) as Record<string, unknown> | null;
+					if (parsed && typeof parsed === 'object') {
+						if (parsed.theme === 'light') theme = 'light';
+						if (typeof parsed.type === 'string') {
+							const t: string = parsed.type;
+							if (t === 'compare' || t === 'timeline' || t === 'diagram' || t === 'report' || t === 'slides') type = t;
+						}
+					}
+				} catch { /* ignore */ }
+				content = source.substring(end + 3).trim();
+			}
+		} else {
+			const t = fl.toLowerCase();
+			if (t === 'compare' || t === 'timeline' || t === 'diagram' || t === 'report' || t === 'slides') {
+				type = t;
+				content = source.substring(nl + 1).trim();
+			}
+		}
+	}
+	const w = el.createDiv({ cls: 'he-wrapper ' + theme });
+	switch (type) {
+		case 'compare': buildCompare(w, content, theme); break;
+		case 'timeline': buildTimeline(w, content); break;
+		case 'diagram': buildDiagram(w, content); break;
+		case 'report': buildReport(w, content, theme); break;
+		case 'slides': buildSlides(w, content); break;
+	}
+}
+
+async function exportNoteAsHTML(app: App, plugin: Component): Promise<void> {
+    const file = app.workspace.getActiveFile();
+    if (!file) { new Notice(t('No active note', '当前没有打开的文件')); return; }
+    
+    const content = await app.vault.read(file);
+    
+    // Render markdown to DOM using Obsidian's engine
+    const tempEl = createDiv();
+    await MarkdownRenderer.render(app, content, tempEl, file.path, plugin);
+    const bodyHtml = tempEl.innerHTML;
+    
+    const title = file.basename;
+    const htmlDoc = buildStandaloneHtml(bodyHtml, title);
+    const outPath = (file.parent ? file.parent.path + '/' : '') + title + '.html';
+    await app.vault.create(outPath, htmlDoc);
+    new Notice(t('Exported: ', '已导出：') + outPath);
+}
+
+function buildStandaloneHtml(bodyHtml: string, title: string): string {
+    return `<!DOCTYPE html>
+<html lang="${isChineseUI() ? 'zh' : 'en'}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>${escapeHtml(title)}</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --he-clay: #D97757; --he-slate: #141413; --he-ivory: #FAF9F5; --he-oat: #E3DACC;
+  --he-white: #FFFFFF; --he-gray-100: #F0EEE6; --he-gray-300: #D1CFC5;
+  --he-gray-500: #87867F; --he-gray-700: #3D3D3A;
+  --he-success: #788C5D; --he-warning: #C78E3F; --he-danger: #B04A4A; --he-info: #5C7CA3;
+  --he-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --he-font-mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+body { font-family: var(--he-font-sans); font-size: 16px; line-height: 1.6;
+       color: var(--he-slate); background: var(--he-ivory); max-width: 880px;
+       margin: 0 auto; padding: 48px 24px; -webkit-font-smoothing: antialiased; }
+h1 { font-size: 28px; font-weight: 500; }
+h2 { font-size: 22px; font-weight: 500; }
+h3 { font-size: 18px; font-weight: 500; }
+code { font-family: var(--he-font-mono); font-size: 0.9em; background: var(--he-gray-100); padding: 2px 6px; border-radius: 4px; }
+pre { background: var(--he-gray-100); padding: 16px; border-radius: 8px; overflow: auto; }
+pre code { background: none; padding: 0; }
+a { color: var(--he-info); text-decoration: none; border-bottom: 1px solid currentColor; }
+blockquote { border-left: 3px solid var(--he-gray-300); margin: 0; padding: 8px 20px; color: var(--he-gray-700); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--he-gray-300); }
+img { max-width: 100%; }
+.zoom-container { transform-origin: top left; }
+.zoom-bar { position: fixed; bottom: 24px; right: 24px; display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: var(--he-white); border: 1px solid var(--he-gray-300); border-radius: 12px; box-shadow: 0 4px 10px rgba(20,20,19,.08); z-index: 999; user-select: none; opacity: .7; transition: opacity .2s; }
+.zoom-bar:hover { opacity: 1; }
+.zoom-btn { display: grid; place-items: center; width: 28px; height: 28px; border: none; background: 0 0; border-radius: 4px; cursor: pointer; font-size: 16px; color: var(--he-slate); transition: background .1s; line-height: 1; }
+.zoom-btn:hover { background: var(--he-gray-100); }
+.zoom-level { min-width: 40px; text-align: center; font-family: var(--he-font-mono); font-size: 12px; color: var(--he-gray-500); }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --he-slate: #E8E6DF; --he-ivory: #16171A; --he-white: #1F2024;
+    --he-gray-100: #24262B; --he-gray-300: #3A3D43;
+    --he-gray-500: #8A8D94; --he-gray-700: #B4B7BE;
+    --he-clay: #E08A6A; --he-info: #7FA6D6;
+  }
+}
+</style>
+</head>
+<body>
+<div class="zoom-container">
+${bodyHtml}
+</div>
+<script>
+(function(){var MIN=.3,MAX=3,STEP=.1,zoom=1;function apply(){var c=document.querySelector('.zoom-container');if(!c)return;c.style.transform='scale('+zoom+')';c.style.transformOrigin='top left';c.style.width=(100/zoom)+'%';var el=document.querySelector('.zoom-level');if(el)el.textContent=Math.round(zoom*100)+'%'}var nw=document.body.scrollWidth||1;if(nw>1){var vw=window.innerWidth||document.documentElement.clientWidth||1;zoom=Math.max(MIN,Math.min(1,vw/nw))}var b=document.createElement('div');b.className='zoom-bar';b.innerHTML='<button class="zoom-btn" id="zo">\u2212</button><span class="zoom-level">'+Math.round(zoom*100)+'%</span><button class="zoom-btn" id="zi">+</button><button class="zoom-btn" id="zr">\u27F2</button>';document.body.appendChild(b);document.getElementById('zi').onclick=function(){zoom=Math.min(MAX,zoom+STEP);apply()};document.getElementById('zo').onclick=function(){zoom=Math.max(MIN,zoom-STEP);apply()};document.getElementById('zr').onclick=function(){zoom=1;apply()};document.addEventListener('wheel',function(e){if(!e.ctrlKey&&!e.metaKey)return;e.preventDefault();zoom=Math.max(MIN,Math.min(MAX,zoom-e.deltaY*.002));apply()},{passive:false});document.addEventListener('keydown',function(e){if(!e.ctrlKey&&!e.metaKey)return;if(e.key==='='||e.key==='+'){e.preventDefault();zoom=Math.min(MAX,zoom+STEP);apply()}else if(e.key==='-'){e.preventDefault();zoom=Math.max(MIN,zoom-STEP);apply()}else if(e.key==='0'){e.preventDefault();zoom=1;apply()}});apply()})();
+</script>
+</body>
+</html>`;
+}
+
+class HEHTMLView extends ItemView {
+	file: TFile | null = null;
+	mode: 'preview' | 'edit' = 'preview';
+	dirty = false;
+	private iframe: HTMLIFrameElement | null = null;
+	private textarea: HTMLTextAreaElement | null = null;
+
+	constructor(leaf: WorkspaceLeaf) {
+		super(leaf);
+	}
+
+	getViewType(): string {
+		return VIEW_TYPE;
+	}
+
+	getDisplayText(): string {
+		const base = this.file ? this.file.basename : 'HTML Preview';
+		return this.mode === 'edit' ? base + ' (Edit)' : base;
+	}
+
+	getIcon(): string {
+		return this.mode === 'edit' ? 'pencil' : 'eye';
+	}
+
+	async setState(state: Record<string, unknown>): Promise<void> {
+		if (state?.file && typeof state.file === 'string') {
+			const file = this.app.vault.getFileByPath(state.file);
+			if (file) {
+				this.mode = state.mode === 'edit' ? 'edit' : 'preview';
+				await this.setFile(file);
+			}
+		}
+	}
+
+	getState(): Record<string, unknown> {
+		return { file: this.file?.path, mode: this.mode };
+	}
+
+	async setFile(file: TFile): Promise<void> {
+		// Don't allow the same HTML file to open in multiple tabs
+		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
+		for (const leaf of leaves) {
+			const view = leaf.view;
+			if (view !== this && view instanceof HEHTMLView && view.file?.path === file.path && leaf.view !== null) {
+				this.app.workspace.setActiveLeaf(leaf, { focus: true });
+				this.leaf.detach();
+				return;
+			}
+		}
+		this.file = file;
+		await this.render();
+	}
+
+	/** Rebuild the view chrome (toolbar) then render preview or editor body. */
+	private async render(): Promise<void> {
+		const container = this.contentEl;
+		container.empty();
+		container.addClass('he-htmlview-container');
+		this.iframe = null;
+		this.textarea = null;
+
+		const toolbar = container.createDiv({ cls: 'he-view-toolbar' });
+		const toggle = toolbar.createEl('button', {
+			cls: 'he-view-toggle',
+			text: this.mode === 'preview' ? t('✏️ Edit', '✏️ 编辑') : t('👁 Preview', '👁 预览')
+		});
+		toggle.addEventListener('click', () => void this.toggleMode());
+		const save = toolbar.createEl('button', {
+			cls: 'he-view-save',
+			text: t('💾 Save (Ctrl+S)', '💾 保存（Ctrl+S）')
+		});
+		save.hidden = this.mode !== 'edit';
+		save.addEventListener('click', () => void this.saveFile());
+
+		if (this.mode === 'edit') {
+			await this.loadEditor();
+		} else {
+			await this.loadContent();
+		}
+	}
+
+	async toggleMode(): Promise<void> {
+		if (this.mode === 'edit' && this.dirty) {
+			if (!window.confirm(t('Discard unsaved changes and switch to preview?', '放弃未保存的修改并切换到预览？'))) return;
+		}
+		this.dirty = false;
+		this.mode = this.mode === 'preview' ? 'edit' : 'preview';
+		await this.render();
+	}
+
+	async saveFile(): Promise<void> {
+		if (!this.file || !this.textarea) return;
+		const newText = this.textarea.value;
+		const current = await this.app.vault.read(this.file);
+		if (newText === current) {
+			this.dirty = false;
+			return;
+		}
+		await this.app.vault.modify(this.file, newText);
+		this.dirty = false;
+		new Notice(t('Saved: ', '已保存：') + this.file.path);
+	}
+
+	private async loadEditor(): Promise<void> {
+		if (!this.file) return;
+		const content = await this.app.vault.read(this.file);
+		const container = this.contentEl;
+		const ta = container.ownerDocument.createElement('textarea');
+		ta.className = 'he-edit-textarea';
+		ta.spellcheck = false;
+		ta.value = content;
+		ta.addEventListener('input', () => { this.dirty = true; });
+		ta.addEventListener('keydown', (e: KeyboardEvent) => {
+			if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 's' || e.key === 'S')) {
+				e.preventDefault();
+				void this.saveFile();
+			}
+		});
+		container.appendChild(ta);
+		this.textarea = ta;
+		this.dirty = false;
+	}
+
+	private async loadContent(): Promise<void> {
+		if (!this.file) return;
+		let content = await this.app.vault.read(this.file);
+		const parentPath = this.file.parent ? this.file.parent.path : '';
+		content = content.replace(/(src|href)="([^"]+)"/g, (_match: string, attr: string, url: string): string => {
+			if (url.startsWith('http') || url.startsWith('data') || url.startsWith('app://')) {
+				return _match;
+			}
+			const fullPath: string = parentPath ? parentPath + '/' + url : url;
+			try {
+				const resourceUrl = this.app.vault.adapter!.getResourcePath(fullPath);
+				return attr + '="' + resourceUrl + '"';
+			} catch {
+				return _match;
+			}
+		});
+
+		// inject zoom controls (skip if content already has them, e.g. html-effectiveness generated,
+		// or if the page manages its own viewport layout — wrapping it would break canvas pointer math)
+		if (!content.includes('zoom-bar') && !isViewportLayoutPage(content)) {
+			const zoomHtml = `<style>.zoom-container{transform-origin:top left}.zoom-bar{position:fixed;bottom:24px;right:24px;display:flex;align-items:center;gap:4px;padding:4px 8px;background:var(--he-white,#fff);border:1px solid var(--he-gray-300,#d1cfc5);border-radius:12px;box-shadow:0 4px 10px rgba(20,20,19,.08);z-index:999;user-select:none;opacity:.7;transition:opacity .2s}.zoom-bar:hover{opacity:1}.zoom-btn{display:grid;place-items:center;width:28px;height:28px;border:none;background:0 0;border-radius:4px;cursor:pointer;font-size:16px;color:var(--he-slate,#141413);transition:background .1s;line-height:1}.zoom-btn:hover{background:var(--he-gray-100,#f0eee6)}.zoom-level{min-width:40px;text-align:center;font-family:ui-monospace,monospace;font-size:12px;color:var(--he-gray-500,#87867f)}</style>
+<script>(function(){var MIN=.3,MAX=3,STEP=.1,zoom=1;function apply(){var c=document.querySelector('.zoom-container');if(!c)return;c.style.transform='scale('+zoom+')';c.style.transformOrigin='top left';c.style.width=(100/zoom)+'%';var el=document.querySelector('.zoom-level');if(el)el.textContent=Math.round(zoom*100)+'%'}var nw=document.body.scrollWidth||1;if(!document.querySelector('.zoom-bar')){var w=document.createElement('div');w.className='zoom-container';while(document.body.firstChild)w.appendChild(document.body.firstChild);document.body.appendChild(w);var vw=window.innerWidth||document.documentElement.clientWidth||1;zoom=Math.max(MIN,Math.min(1,vw/nw));var b=document.createElement('div');b.className='zoom-bar';b.innerHTML='<button class="zoom-btn" id="zo">\u2212</button><span class="zoom-level">'+Math.round(zoom*100)+'%</span><button class="zoom-btn" id="zi">+</button><button class="zoom-btn" id="zr">\u27F2</button>';document.body.appendChild(b);document.getElementById('zi').onclick=function(){zoom=Math.min(MAX,zoom+STEP);apply()};document.getElementById('zo').onclick=function(){zoom=Math.max(MIN,zoom-STEP);apply()};document.getElementById('zr').onclick=function(){zoom=1;apply()};document.addEventListener('wheel',function(e){if(!e.ctrlKey&&!e.metaKey)return;e.preventDefault();zoom=Math.max(MIN,Math.min(MAX,zoom-e.deltaY*.002));apply()},{passive:false});document.addEventListener('keydown',function(e){if(!e.ctrlKey&&!e.metaKey)return;if(e.key==='='||e.key==='+'){e.preventDefault();zoom=Math.min(MAX,zoom+STEP);apply()}else if(e.key==='-'){e.preventDefault();zoom=Math.max(MIN,zoom-STEP);apply()}else if(e.key==='0'){e.preventDefault();zoom=1;apply()}})}apply()})();
+</script>`;
+			const bodyEnd = content.lastIndexOf('</body>');
+			if (bodyEnd >= 0) {
+				content = content.slice(0, bodyEnd) + zoomHtml + content.slice(bodyEnd);
+			} else {
+				content += zoomHtml;
+			}
+		}
+		const container = this.contentEl;
+		this.iframe = container.ownerDocument.createElement('iframe');
+		// allow-forms / allow-modals / allow-popups / allow-downloads matter for interactive
+		// pages: without them Sandbox silently drops submit(), alert()/confirm(), window.open()
+		// and <a download>, which looks like the page is broken.
+		this.iframe.setAttribute(
+			'sandbox',
+			'allow-same-origin allow-scripts allow-forms allow-modals allow-popups allow-downloads',
+		);
+		this.iframe.setAttribute('srcdoc', content);
+		this.iframe.className = 'he-htmlview-iframe';
+		container.appendChild(this.iframe);
+	}
+
+	async onOpen(): Promise<void> {
+	}
+
+	async onClose(): Promise<void> {
+		this.iframe = null;
+		this.file = null;
+	}
+}
+
+export default class HEExtPlugin extends Plugin {
+	settings: HESettings = DEFAULT_SETTINGS;
+	views: HEHTMLView[] = [];
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 
+		this.registerView(VIEW_TYPE, (leaf) => {
+			const view = new HEHTMLView(leaf);
+			this.views.push(view);
+			return view;
+		});
+		this.registerExtensions(['html'], VIEW_TYPE);
+
+		// Helper: reveal existing view for the same file if one exists; return true if found
+		const revealExisting = (filePath: string): boolean => {
+			for (const v of this.views) {
+				if (v.file?.path === filePath && v.leaf.view !== null) {
+					this.app.workspace.setActiveLeaf(v.leaf, { focus: true });
+					return true;
+				}
+			}
+			return false;
+		};
+
+		this.registerEvent(this.app.workspace.on('file-menu', (menu, file) => {
+			if (file instanceof TFile && file.extension === 'html') {
+				menu.addItem((item) => {
+					item.setTitle(t('Open with HTML Effectiveness', '用 HTML Effectiveness 打开'))
+						.setIcon('eye')
+						.onClick(async () => {
+							if (revealExisting(file.path)) return;
+							const leaf = this.app.workspace.getLeaf(true);
+							await leaf.setViewState({
+								type: VIEW_TYPE,
+								state: { file: file.path }
+							});
+						});
+				});
+			}
+		}));
+
 		this.addCommand({
-			id: 'convert-md-to-html',
-			name: 'Convert current note to HTML Effectiveness',
+			id: 'open-html-view',
+			name: t('Open current file in HTML viewer', '用 HTML 查看器打开当前文件'),
 			checkCallback: (checking) => {
-				const file = this.app.workspace.getActiveFile();
-				if (file && file.extension === 'md') {
-					if (!checking) void convertFile(this.app, file, this.settings.theme);
+				const f = this.app.workspace.getActiveFile();
+				if (f?.extension === 'html') {
+					if (!checking) {
+						if (revealExisting(f.path)) return true;
+						const leaf = this.app.workspace.getLeaf(true);
+						void leaf.setViewState({
+							type: VIEW_TYPE,
+							state: { file: f.path }
+						});
+					}
 					return true;
 				}
 				return false;
 			}
 		});
 
-		this.addCommand({
-			id: 'convert-batch-md-to-html',
-			name: 'Convert all markdown in folder to HTML',
-			callback: async (): Promise<void> => {
-				const file = this.app.workspace.getActiveFile();
-				if (!file) { new Notice('Open a file in the folder to convert'); return; }
-				const folder = file.parent;
-				if (!folder) { new Notice('Cannot determine folder'); return; }
-				const mdFiles = folder.children.filter(c => c instanceof TFile && c.extension === 'md') as TFile[];
-				let count = 0;
-				for (const f of mdFiles) {
-					const outPath = folder.path + '/' + f.basename + '.html';
-					if (this.app.vault.getFileByPath(outPath)) continue;
-					await convertFile(this.app, f, this.settings.theme);
-					count++;
+		this.registerEvent(this.app.workspace.on('layout-change', () => {
+			this.views = this.views.filter(v => v.leaf.view !== null);
+		}));
+
+		this.registerEvent(this.app.vault.on('modify', (file) => {
+			if (file instanceof TFile && file.extension === 'html') {
+				for (const view of this.views) {
+					if (view.file?.path === file.path) {
+						// Don't clobber an editor the user is actively working in
+						if (view.mode === 'edit') continue;
+						void view.setFile(file);
+					}
 				}
-				new Notice('Converted ' + count + ' files in ' + folder.name);
+			}
+		}));
+
+		this.addCommand({
+			id: 'toggle-html-edit',
+			name: t('Toggle edit/preview mode for HTML viewer', '切换 HTML 查看器的编辑/预览模式'),
+			checkCallback: (checking) => {
+				const active = this.app.workspace.getActiveViewOfType(HEHTMLView);
+				if (!active) return false;
+				if (!checking) void active.toggleMode();
+				return true;
 			}
 		});
 
-		this.addSettingTab(new MD2HESettingTab(this.app, this));
+		this.addCommand({
+			id: 'save-html-edit',
+			name: t('Save HTML file (edit mode)', '保存 HTML 文件（编辑模式）'),
+			checkCallback: (checking) => {
+				const active = this.app.workspace.getActiveViewOfType(HEHTMLView);
+				if (!active || active.mode !== 'edit') return false;
+				if (!checking) void active.saveFile();
+				return true;
+			}
+		});
+
+		this.registerMarkdownCodeBlockProcessor('html-effect', (src, el, ctx) => {
+			processor(src, el, ctx, this.settings.defaultTheme);
+		});
+
+		this.addCommand({ id: 'export-note', name: t('Export note as HTML', '将笔记导出为 HTML'), callback: () => exportNoteAsHTML(this.app, this) });
+		this.addCommand({ id: 'compare', name: t('Compare', '对比'), editorCallback: (e) => e.replaceSelection('```html-effect\ncompare\n\nLeft\n---\nRight\n```') });
+		this.addCommand({ id: 'timeline', name: t('Timeline', '时间线'), editorCallback: (e) => e.replaceSelection('```html-effect\ntimeline\n\n- [2026-01] Event\n- [2026-06] Another\n```') });
+		this.addCommand({ id: 'report', name: t('Report', '报告'), editorCallback: (e) => e.replaceSelection('```html-effect\n---\ntype: report\n---\n## \n- 85%: Rate\n\n# Title\nContent\n```') });
+		this.addCommand({ id: 'slides', name: t('Slides', '幻灯片'), editorCallback: (e) => e.replaceSelection('```html-effect\nslides\n\n# One\nContent\n---\n# Two\nContent\n```') });
+		this.addCommand({ id: 'diagram', name: t('Diagram', '图示'), editorCallback: (e) => e.replaceSelection('```html-effect\ndiagram\n\n\xe2\x94\x8c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x90\n\xe2\x94\x82App\xe2\x94\x82\n\xe2\x94\x94\xe2\x94\xac\xe2\x94\x80\xe2\x94\x98\n  \xe2\x96\xbc\n\xe2\x94\x8c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x90\n\xe2\x94\x82DB\xe2\x94\x82\n\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80\xe2\x94\x98\n```') });
+		this.addSettingTab(new HESettingTab(this.app, this));
 	}
 
 	async loadSettings(): Promise<void> {
 		const data: Record<string, unknown> | null = await this.loadData() as Record<string, unknown> | null;
-		if (data && typeof data === 'object') {
-			if (data.theme === 'light') this.settings.theme = 'light';
+		if (data) {
+			if (data.defaultTheme === 'light') this.settings.defaultTheme = 'light';
 		}
 	}
 
@@ -207,18 +1246,18 @@ export default class MD2HEPlugin extends Plugin {
 	}
 }
 
-class MD2HESettingTab extends PluginSettingTab {
-	plugin: MD2HEPlugin;
-	constructor(app: App, plugin: MD2HEPlugin) { super(app, plugin); this.plugin = plugin; }
+class HESettingTab extends PluginSettingTab {
+	plugin: HEExtPlugin;
+	constructor(app: App, plugin: HEExtPlugin) { super(app, plugin); this.plugin = plugin; }
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-		new Setting(containerEl).setName('Display').setHeading();
-		new Setting(containerEl).setName('Output theme').setDesc('Color theme for generated HTML files')
-			.addDropdown(d => d.addOption('dark', 'Dark').addOption('light', 'Light')
-				.setValue(this.plugin.settings.theme)
+		new Setting(containerEl).setName(t('Display', '显示')).setHeading();
+		new Setting(containerEl).setName(t('Default theme', '默认主题')).setDesc(t('Theme for rendered blocks', '代码块渲染时使用的主题'))
+			.addDropdown(d => d.addOption('dark', t('Dark', '深色')).addOption('light', t('Light', '浅色'))
+				.setValue(this.plugin.settings.defaultTheme)
 				.onChange(async (v) => {
-					this.plugin.settings.theme = v as 'dark' | 'light';
+					this.plugin.settings.defaultTheme = v as 'dark' | 'light';
 					await this.plugin.saveSettings();
 				}));
 	}
