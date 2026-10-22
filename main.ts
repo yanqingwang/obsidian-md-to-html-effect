@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, loadMermaid } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, loadMermaid, type SettingDefinitionItem } from 'obsidian';
 
 type OutputTheme = 'dark' | 'light';
 type ThemeSetting = OutputTheme | 'auto';
@@ -276,10 +276,13 @@ function formatInlineText(text: string): string {
 	return applyEmphasis(escapeHtml(text));
 }
 
+const TOKEN_DELIMITER = '\uE000';
+
 function restoreTokens(value: string, tokens: string[]): string {
 	let result = value;
 	for (let pass = 0; pass < 10; pass++) {
-		const next = result.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => tokens[Number(index)] ?? '');
+		const pattern = new RegExp(TOKEN_DELIMITER + '(\\d+)' + TOKEN_DELIMITER, 'g');
+		const next = result.replace(pattern, (_match, index: string) => tokens[Number(index)] ?? '');
 		if (next === result) break;
 		result = next;
 	}
@@ -580,7 +583,7 @@ function mdToHtml(md: string, resolveImage?: ImageResolver, rawBlocks?: Map<stri
 function parseInline(text: string, resolveImage?: ImageResolver): string {
 	const tokens: string[] = [];
 	const stash = (value: string): string => {
-		const token = '\u0000' + tokens.length + '\u0000';
+		const token = TOKEN_DELIMITER + tokens.length + TOKEN_DELIMITER;
 		tokens.push(value);
 		return token;
 	};
@@ -622,11 +625,19 @@ function buildHtml(title: string, bodyHtml: string, theme: OutputTheme): string 
 	return '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<title>' + escapeHtml(title) + '</title>\n<style>\n' + css + '\n</style>\n</head>\n<body>\n' + bodyHtml + '\n</body>\n</html>';
 }
 
+interface MermaidRenderResult {
+	svg?: string;
+}
+
+interface MermaidApi {
+	render(id: string, text: string, container?: HTMLElement): Promise<string | MermaidRenderResult>;
+}
+
 async function renderMermaidBlocks(markdown: string): Promise<{ markdown: string; rawBlocks: Map<string, string> }> {
 	const lines = markdown.split('\n');
 	const output: string[] = [];
 	const rawBlocks = new Map<string, string>();
-	let mermaid: any = null;
+	let mermaid: MermaidApi | null = null;
 	let diagramIndex = 0;
 
 	for (let i = 0; i < lines.length; i++) {
@@ -648,16 +659,17 @@ async function renderMermaidBlocks(markdown: string): Promise<{ markdown: string
 		}
 
 		const sentinel = '%%MD2HE_MERMAID_' + rawBlocks.size + '%%';
-		const container = document.createElement('div');
-		container.className = 'mermaid';
-		container.style.width = Math.max(600, Math.min(1000, window.innerWidth - 80)) + 'px';
-		container.style.visibility = 'hidden';
-		container.style.position = 'absolute';
-		container.style.left = '0';
-		container.style.top = '0';
+		const container = createDiv({ cls: 'mermaid' });
+		container.setCssStyles({
+			width: Math.max(600, Math.min(1000, window.innerWidth - 80)) + 'px',
+			visibility: 'hidden',
+			position: 'absolute',
+			left: '0',
+			top: '0',
+		});
 		document.body.appendChild(container);
 		try {
-			if (!mermaid) mermaid = await loadMermaid();
+			if (!mermaid) mermaid = (await loadMermaid()) as MermaidApi;
 			const result = await mermaid.render('md2he-mermaid-' + diagramIndex, source.join('\n'), container);
 			diagramIndex++;
 			const svg = typeof result === 'string' ? result : result?.svg;
@@ -753,6 +765,14 @@ export default class MD2HEPlugin extends Plugin {
 
 export { mdToHtml, buildHtml, resolveOutputTheme };
 
+const THEME_OPTIONS: Record<string, string> = {
+	auto: 'Auto (follow Obsidian)',
+	dark: 'Dark',
+	light: 'Light',
+};
+
+const THEME_DESCRIPTION = 'Color theme for generated HTML files. Auto follows the Obsidian theme at conversion time.';
+
 class MD2HESettingTab extends PluginSettingTab {
 	plugin: MD2HEPlugin;
 	constructor(app: App, plugin: MD2HEPlugin) { super(app, plugin); this.plugin = plugin; }
@@ -760,12 +780,42 @@ class MD2HESettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 		new Setting(containerEl).setName('Display').setHeading();
-		new Setting(containerEl).setName('Output theme').setDesc('Color theme for generated HTML files. Auto follows the Obsidian theme at conversion time.')
-			.addDropdown(d => d.addOption('auto', 'Auto (follow Obsidian)').addOption('dark', 'Dark').addOption('light', 'Light')
-				.setValue(this.plugin.settings.theme)
-				.onChange(async (v) => {
-					this.plugin.settings.theme = v as ThemeSetting;
-					await this.plugin.saveSettings();
-				}));
+		new Setting(containerEl).setName('Output theme').setDesc(THEME_DESCRIPTION)
+			.addDropdown(d => {
+				for (const [value, label] of Object.entries(THEME_OPTIONS)) d.addOption(value, label);
+				d.setValue(this.plugin.settings.theme)
+					.onChange(async (v) => {
+						await this.setControlValue('theme', v);
+					});
+			});
+	}
+
+	getSettingDefinitions(): SettingDefinitionItem[] {
+		return [{
+			type: 'group',
+			heading: 'Display',
+			items: [{
+				name: 'Output theme',
+				desc: THEME_DESCRIPTION,
+				control: {
+					type: 'dropdown',
+					key: 'theme',
+					defaultValue: 'auto',
+					options: THEME_OPTIONS,
+				},
+			}],
+		}];
+	}
+
+	getControlValue(key: string): unknown {
+		return key === 'theme' ? this.plugin.settings.theme : undefined;
+	}
+
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (key !== 'theme') return;
+		if (value === 'auto' || value === 'dark' || value === 'light') {
+			this.plugin.settings.theme = value;
+			await this.plugin.saveSettings();
+		}
 	}
 }

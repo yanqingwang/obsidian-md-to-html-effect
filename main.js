@@ -287,10 +287,12 @@ function applyEmphasis(value) {
 function formatInlineText(text) {
   return applyEmphasis(escapeHtml(text));
 }
+var TOKEN_DELIMITER = "\uE000";
 function restoreTokens(value, tokens) {
   let result = value;
   for (let pass = 0; pass < 10; pass++) {
-    const next = result.replace(/\u0000(\d+)\u0000/g, (_match, index) => tokens[Number(index)] ?? "");
+    const pattern = new RegExp(TOKEN_DELIMITER + "(\\d+)" + TOKEN_DELIMITER, "g");
+    const next = result.replace(pattern, (_match, index) => tokens[Number(index)] ?? "");
     if (next === result)
       break;
     result = next;
@@ -626,7 +628,7 @@ function mdToHtml(md, resolveImage, rawBlocks) {
 function parseInline(text, resolveImage) {
   const tokens = [];
   const stash = (value2) => {
-    const token = "\0" + tokens.length + "\0";
+    const token = TOKEN_DELIMITER + tokens.length + TOKEN_DELIMITER;
     tokens.push(value2);
     return token;
   };
@@ -689,13 +691,14 @@ async function renderMermaidBlocks(markdown) {
       continue;
     }
     const sentinel = "%%MD2HE_MERMAID_" + rawBlocks.size + "%%";
-    const container = document.createElement("div");
-    container.className = "mermaid";
-    container.style.width = Math.max(600, Math.min(1e3, window.innerWidth - 80)) + "px";
-    container.style.visibility = "hidden";
-    container.style.position = "absolute";
-    container.style.left = "0";
-    container.style.top = "0";
+    const container = createDiv({ cls: "mermaid" });
+    container.setCssStyles({
+      width: Math.max(600, Math.min(1e3, window.innerWidth - 80)) + "px",
+      visibility: "hidden",
+      position: "absolute",
+      left: "0",
+      top: "0"
+    });
     document.body.appendChild(container);
     try {
       if (!mermaid)
@@ -795,6 +798,12 @@ var MD2HEPlugin = class extends import_obsidian.Plugin {
     await this.saveData(this.settings);
   }
 };
+var THEME_OPTIONS = {
+  auto: "Auto (follow Obsidian)",
+  dark: "Dark",
+  light: "Light"
+};
+var THEME_DESCRIPTION = "Color theme for generated HTML files. Auto follows the Obsidian theme at conversion time.";
 var MD2HESettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -804,9 +813,39 @@ var MD2HESettingTab = class extends import_obsidian.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     new import_obsidian.Setting(containerEl).setName("Display").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Output theme").setDesc("Color theme for generated HTML files. Auto follows the Obsidian theme at conversion time.").addDropdown((d) => d.addOption("auto", "Auto (follow Obsidian)").addOption("dark", "Dark").addOption("light", "Light").setValue(this.plugin.settings.theme).onChange(async (v) => {
-      this.plugin.settings.theme = v;
+    new import_obsidian.Setting(containerEl).setName("Output theme").setDesc(THEME_DESCRIPTION).addDropdown((d) => {
+      for (const [value, label] of Object.entries(THEME_OPTIONS))
+        d.addOption(value, label);
+      d.setValue(this.plugin.settings.theme).onChange(async (v) => {
+        await this.setControlValue("theme", v);
+      });
+    });
+  }
+  getSettingDefinitions() {
+    return [{
+      type: "group",
+      heading: "Display",
+      items: [{
+        name: "Output theme",
+        desc: THEME_DESCRIPTION,
+        control: {
+          type: "dropdown",
+          key: "theme",
+          defaultValue: "auto",
+          options: THEME_OPTIONS
+        }
+      }]
+    }];
+  }
+  getControlValue(key) {
+    return key === "theme" ? this.plugin.settings.theme : void 0;
+  }
+  async setControlValue(key, value) {
+    if (key !== "theme")
+      return;
+    if (value === "auto" || value === "dark" || value === "light") {
+      this.plugin.settings.theme = value;
       await this.plugin.saveSettings();
-    }));
+    }
   }
 };
