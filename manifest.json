@@ -1,9 +1,9 @@
 {
 	"id": "md-to-html-effect",
 	"name": "MD to HTML Effectiveness",
-	"version": "1.0.25",
+	"version": "1.1.0",
 	"minAppVersion": "1.7.0",
-	"description": "Render spatial HTML in notes — compare, timeline, diagram (SVG), report, slides. Export as standalone HTML with zoom controls. Based on html-effectiveness methodology.",
+	"description": "Convert Markdown notes to a single standalone HTML file with embedded images, tables, Mermaid diagrams, and dark/light themes.",
 	"author": "rosswang",
 	"authorUrl": "https://github.com/yanqingwang",
 	"isDesktopOnly": false
