@@ -28,11 +28,17 @@ __export(main_exports, {
   buildEmbeddedImageMap: () => buildEmbeddedImageMap,
   buildHtml: () => buildHtml,
   default: () => MD2HEPlugin,
-  mdToHtml: () => mdToHtml
+  mdToHtml: () => mdToHtml,
+  resolveOutputTheme: () => resolveOutputTheme
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
-var DEFAULT_SETTINGS = { theme: "dark" };
+var DEFAULT_SETTINGS = { theme: "auto" };
+function resolveOutputTheme(theme, isDark = document.body.classList.contains("theme-dark")) {
+  if (theme === "auto")
+    return isDark ? "dark" : "light";
+  return theme;
+}
 function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -716,6 +722,7 @@ async function renderMermaidBlocks(markdown) {
   return { markdown: output.join("\n"), rawBlocks };
 }
 async function convertFile(app, file, theme) {
+  const outputTheme = resolveOutputTheme(theme);
   const content = await app.vault.read(file);
   const { markdown, rawBlocks } = await renderMermaidBlocks(content);
   const embeddedImages = await buildEmbeddedImageMap(app, file, markdown);
@@ -725,13 +732,13 @@ async function convertFile(app, file, theme) {
     new import_obsidian.Notice("HTML file already exists: " + outPath);
     return;
   }
-  await app.vault.create(outPath, buildHtml(file.basename, htmlContent, theme));
+  await app.vault.create(outPath, buildHtml(file.basename, htmlContent, outputTheme));
   new import_obsidian.Notice("Converted: " + outPath);
 }
 var MD2HEPlugin = class extends import_obsidian.Plugin {
   constructor() {
     super(...arguments);
-    this.settings = DEFAULT_SETTINGS;
+    this.settings = { ...DEFAULT_SETTINGS };
   }
   async onload() {
     await this.loadSettings();
@@ -779,8 +786,9 @@ var MD2HEPlugin = class extends import_obsidian.Plugin {
   async loadSettings() {
     const data = await this.loadData();
     if (data && typeof data === "object") {
-      if (data.theme === "light")
-        this.settings.theme = "light";
+      const theme = data.theme;
+      if (theme === "auto" || theme === "light" || theme === "dark")
+        this.settings.theme = theme;
     }
   }
   async saveSettings() {
@@ -796,7 +804,7 @@ var MD2HESettingTab = class extends import_obsidian.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     new import_obsidian.Setting(containerEl).setName("Display").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Output theme").setDesc("Color theme for generated HTML files").addDropdown((d) => d.addOption("dark", "Dark").addOption("light", "Light").setValue(this.plugin.settings.theme).onChange(async (v) => {
+    new import_obsidian.Setting(containerEl).setName("Output theme").setDesc("Color theme for generated HTML files. Auto follows the Obsidian theme at conversion time.").addDropdown((d) => d.addOption("auto", "Auto (follow Obsidian)").addOption("dark", "Dark").addOption("light", "Light").setValue(this.plugin.settings.theme).onChange(async (v) => {
       this.plugin.settings.theme = v;
       await this.plugin.saveSettings();
     }));

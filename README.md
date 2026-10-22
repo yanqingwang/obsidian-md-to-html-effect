@@ -14,7 +14,7 @@ Obsidian notes are locked inside the app. When you want to share a formatted not
 
 - **Convert current note** — command palette → "Convert current note to HTML Effectiveness"
 - **Batch convert folder** — convert all new `.md` files in the current folder
-- **Dark / light output** — choose the theme in plugin settings
+- **Output theme** — Dark, Light, or Auto; Auto follows the current Obsidian theme when you convert
 - **Same folder output** — the `.html` file is written next to the `.md` source
 - **Markdown images** — supports `![alt](path)`, titles, and Obsidian size syntax `![alt|300](path)`
 - **Obsidian image embeds** — supports `![[image.png]]`, `![[image.png|300]]`, and `![[image.png|300x200]]`
@@ -51,7 +51,7 @@ Local images are embedded into the HTML as data URIs, so the generated file can 
 
 ### Output
 
-The generated file contains inline CSS, no external scripts, and a responsive light or dark theme. Local images are embedded as data URIs, so the HTML is self-contained apart from external image URLs. Tables use proper `<thead>` / `<tbody>` markup, and image dimensions from Obsidian embeds are preserved. Mermaid diagrams are converted to inline SVG, so the HTML does not need a Mermaid runtime.
+The generated file contains inline CSS, no external scripts, and a responsive light or dark theme. With Auto, the theme is captured from Obsidian at conversion time; changing the Obsidian theme later does not modify existing HTML, so reconvert to update it. Local images are embedded as data URIs, so the HTML is self-contained apart from external image URLs. Tables use proper `<thead>` / `<tbody>` markup, and image dimensions from Obsidian embeds are preserved. Mermaid diagrams are converted to inline SVG, so the HTML does not need a Mermaid runtime.
 
 ### Development
 
@@ -86,7 +86,7 @@ Obsidian 笔记被锁定在应用内。想以网页形式分享格式化笔记�
 
 - **转换当前笔记** —— 命令面板 → "Convert current note to HTML Effectiveness"
 - **批量转换文件夹** —— 转换当前文件夹内所有新的 `.md` 文件
-- **深色 / 浅色输出** —— 在插件设置中选择主题
+- **输出主题** —— 深色、浅色或自动；自动模式在转换时跟随 Obsidian 当前主题
 - **同目录输出** —— `.html` 文件与 `.md` 源文件位于同一文件夹
 - **Markdown 图片** —— 支持 `![alt](path)`、标题，以及 Obsidian 尺寸语法 `![alt|300](path)`
 - **Obsidian 图片嵌入** —— 支持 `![[image.png]]`、`![[image.png|300]]`、`![[image.png|300x200]]`
@@ -123,7 +123,7 @@ Obsidian 笔记被锁定在应用内。想以网页形式分享格式化笔记�
 
 ### 输出
 
-生成的文件包含内联 CSS，不依赖外部脚本，并提供响应式深色或浅色主题。本地图片会以 data URI 内嵌，因此除了外链图片之外，HTML 是自包含的。表格使用正确的 `<thead>` / `<tbody>` 结构，Obsidian 图片嵌入中的宽高设置会保留。Mermaid 图表会转换为内联 SVG，因此 HTML 不需要额外的 Mermaid 运行时。
+生成的文件包含内联 CSS，不依赖外部脚本，并提供响应式深色或浅色主题。选择自动模式时，主题会在转换时从 Obsidian 读取；之后更改 Obsidian 主题不会修改已经生成的 HTML，需要重新转换。本地图片会以 data URI 内嵌，因此除了外链图片之外，HTML 是自包含的。表格使用正确的 `<thead>` / `<tbody>` 结构，Obsidian 图片嵌入中的宽高设置会保留。Mermaid 图表会转换为内联 SVG，因此 HTML 不需要额外的 Mermaid 运行时。
 
 ### 开发
 

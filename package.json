@@ -1,7 +1,7 @@
 {
 	"name": "obsidian-md-to-html-effect",
-	"version": "1.1.0",
-	"description": "Convert Markdown to html-effectiveness standard HTML",
+	"version": "1.1.1",
+	"description": "Convert Markdown notes to a single standalone HTML file with embedded images, tables, Mermaid diagrams, and dark/light themes.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",

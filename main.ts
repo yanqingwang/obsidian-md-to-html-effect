@@ -1,7 +1,14 @@
 import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, loadMermaid } from 'obsidian';
 
-interface MD2HESettings { theme: 'dark' | 'light'; }
-const DEFAULT_SETTINGS: MD2HESettings = { theme: 'dark' };
+type OutputTheme = 'dark' | 'light';
+type ThemeSetting = OutputTheme | 'auto';
+interface MD2HESettings { theme: ThemeSetting; }
+const DEFAULT_SETTINGS: MD2HESettings = { theme: 'auto' };
+
+function resolveOutputTheme(theme: ThemeSetting, isDark = document.body.classList.contains('theme-dark')): OutputTheme {
+	if (theme === 'auto') return isDark ? 'dark' : 'light';
+	return theme;
+}
 
 function escapeHtml(s: string): string {
 	return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -610,7 +617,7 @@ function parseInline(text: string, resolveImage?: ImageResolver): string {
 	return restoreTokens(applyEmphasis(escapeHtml(value)), tokens);
 }
 
-function buildHtml(title: string, bodyHtml: string, theme: string): string {
+function buildHtml(title: string, bodyHtml: string, theme: OutputTheme): string {
 	const css = theme === 'light' ? CSS_LIGHT : CSS_DARK;
 	return '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n<title>' + escapeHtml(title) + '</title>\n<style>\n' + css + '\n</style>\n</head>\n<body>\n' + bodyHtml + '\n</body>\n</html>';
 }
@@ -674,7 +681,8 @@ async function renderMermaidBlocks(markdown: string): Promise<{ markdown: string
 	return { markdown: output.join('\n'), rawBlocks };
 }
 
-async function convertFile(app: App, file: TFile, theme: string): Promise<void> {
+async function convertFile(app: App, file: TFile, theme: ThemeSetting): Promise<void> {
+	const outputTheme = resolveOutputTheme(theme);
 	const content = await app.vault.read(file);
 	const { markdown, rawBlocks } = await renderMermaidBlocks(content);
 	const embeddedImages = await buildEmbeddedImageMap(app, file, markdown);
@@ -684,12 +692,12 @@ async function convertFile(app: App, file: TFile, theme: string): Promise<void> 
 		new Notice('HTML file already exists: ' + outPath);
 		return;
 	}
-	await app.vault.create(outPath, buildHtml(file.basename, htmlContent, theme));
+	await app.vault.create(outPath, buildHtml(file.basename, htmlContent, outputTheme));
 	new Notice('Converted: ' + outPath);
 }
 
 export default class MD2HEPlugin extends Plugin {
-	settings: MD2HESettings = DEFAULT_SETTINGS;
+	settings: MD2HESettings = { ...DEFAULT_SETTINGS };
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -733,7 +741,8 @@ export default class MD2HEPlugin extends Plugin {
 	async loadSettings(): Promise<void> {
 		const data: Record<string, unknown> | null = await this.loadData() as Record<string, unknown> | null;
 		if (data && typeof data === 'object') {
-			if (data.theme === 'light') this.settings.theme = 'light';
+			const theme = data.theme;
+			if (theme === 'auto' || theme === 'light' || theme === 'dark') this.settings.theme = theme;
 		}
 	}
 
@@ -742,7 +751,7 @@ export default class MD2HEPlugin extends Plugin {
 	}
 }
 
-export { mdToHtml, buildHtml };
+export { mdToHtml, buildHtml, resolveOutputTheme };
 
 class MD2HESettingTab extends PluginSettingTab {
 	plugin: MD2HEPlugin;
@@ -751,11 +760,11 @@ class MD2HESettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 		new Setting(containerEl).setName('Display').setHeading();
-		new Setting(containerEl).setName('Output theme').setDesc('Color theme for generated HTML files')
-			.addDropdown(d => d.addOption('dark', 'Dark').addOption('light', 'Light')
+		new Setting(containerEl).setName('Output theme').setDesc('Color theme for generated HTML files. Auto follows the Obsidian theme at conversion time.')
+			.addDropdown(d => d.addOption('auto', 'Auto (follow Obsidian)').addOption('dark', 'Dark').addOption('light', 'Light')
 				.setValue(this.plugin.settings.theme)
 				.onChange(async (v) => {
-					this.plugin.settings.theme = v as 'dark' | 'light';
+					this.plugin.settings.theme = v as ThemeSetting;
 					await this.plugin.saveSettings();
 				}));
 	}

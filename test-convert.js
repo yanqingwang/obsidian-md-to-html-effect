@@ -39,7 +39,7 @@ function loadConverter() {
     return module.exports;
 }
 
-const { mdToHtml, buildHtml, buildEmbeddedImageMap } = loadConverter();
+const { mdToHtml, buildHtml, buildEmbeddedImageMap, resolveOutputTheme } = loadConverter();
 
 let passed = 0;
 const failures = [];
@@ -62,6 +62,13 @@ function notContains(name, html, needle) {
 
 function equal(name, actual, expected) {
     check(name, actual === expected, 'expected ' + JSON.stringify(expected) + ', got ' + JSON.stringify(actual));
+}
+
+function runThemeTests() {
+    equal('auto theme follows dark Obsidian', resolveOutputTheme('auto', true), 'dark');
+    equal('auto theme follows light Obsidian', resolveOutputTheme('auto', false), 'light');
+    equal('explicit light theme ignored dark Obsidian', resolveOutputTheme('light', true), 'light');
+    equal('explicit dark theme ignored light Obsidian', resolveOutputTheme('dark', false), 'dark');
 }
 
 function runInlineTests() {
@@ -285,6 +292,7 @@ function validateSample(html) {
 }
 
 async function main() {
+    runThemeTests();
     runInlineTests();
     await runEmbeddingTests();
     runTableTests();
